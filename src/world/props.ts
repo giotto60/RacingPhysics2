@@ -181,6 +181,19 @@ export const PROP_DEFS: Record<PropKind, PropDefinition> = {
   },
 };
 
+/** Class masses the inertia tensors above were authored against. */
+const referenceMass: Record<PropKind, number> = {
+  cone: 4,
+  sign: 6,
+  barrel: 55,
+  tyreStack: 90,
+  crate: 70,
+  barrier: 900,
+  dumpster: 1300,
+  wall: 1,
+  dummyCar: 1200,
+};
+
 export interface PropInstance {
   def: PropDefinition;
   body: RAPIER.RigidBody | null;
@@ -288,12 +301,13 @@ export class PropWorld {
 
   /** Authored mass and inertia, rescaled if the class mass is retuned live. */
   applyMassProperties(instance: PropInstance): void {
-    if (!instance.body) return;
+    if (!instance.body || instance.frozen) return;
     const def = instance.def;
     const mass = Math.max(0.1, def.massOf(this.params));
-    // Inertia was authored at the default mass; keep the ratios and scale.
-    const reference = Math.max(0.1, PROP_DEFS[def.kind].massOf(this.params));
-    const k = mass / reference;
+    // The inertia figures were authored against the default class mass, so
+    // retuning mass keeps the ratios between the three moments -- and with
+    // them the character of the tumble -- and only changes the scale.
+    const k = mass / Math.max(0.1, referenceMass[def.kind]);
     instance.body.setAdditionalMassProperties(
       mass,
       { x: def.com.x, y: def.com.y, z: def.com.z },
@@ -346,7 +360,7 @@ export class PropWorld {
     if (dynamic.length <= cap) return;
 
     const settled = dynamic
-      .filter((p) => p.body?.isSleeping())
+      .filter((p) => p.body !== null && p.body.isSleeping())
       .sort((a, b) => a.order - b.order);
     let toFreeze = dynamic.length - cap;
     for (const prop of settled) {
@@ -370,7 +384,7 @@ export class PropWorld {
     const collider = this.physics.world.createCollider(desc, body);
     registerSurface(collider.handle, 'tarmac');
 
-    prop.body = null;
+    prop.body = body;
     prop.interpolated = null;
     prop.frozen = true;
     (prop as { collider: RAPIER.Collider }).collider = collider;
@@ -383,7 +397,7 @@ export class PropWorld {
     for (const prop of this.props) {
       if (prop.frozen && prop.def.propClass !== 'D') {
         // Frozen debris has to be re-created as a dynamic body to come back.
-        this.physics.world.removeCollider(prop.collider, false);
+        if (prop.body) this.physics.world.removeRigidBody(prop.body);
         const body = this.physics.world.createRigidBody(
           RAPIER.RigidBodyDesc.dynamic()
             .setCcdEnabled(true)
@@ -408,7 +422,7 @@ export class PropWorld {
         this.applyMassProperties(prop);
         continue;
       }
-      if (!prop.body) continue;
+      if (!prop.body || prop.frozen) continue;
       prop.body.setTranslation(prop.spawnPosition, true);
       prop.body.setRotation(prop.spawnRotation, true);
       prop.body.setLinvel({ x: 0, y: 0, z: 0 }, true);

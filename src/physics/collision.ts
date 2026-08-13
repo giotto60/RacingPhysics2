@@ -237,7 +237,7 @@ export class CollisionResponse {
     const bias = this.params.expression.debrisScatterBias;
     if (bias <= 0) return;
     for (const prop of this.props.props) {
-      if (!prop.body || prop.body.isSleeping()) continue;
+      if (!prop.body || prop.frozen || prop.body.isSleeping()) continue;
       const t = prop.body.translation();
       const away = new THREE.Vector3(t.x - carPosition.x, 0, t.z - carPosition.z);
       const d = away.length();

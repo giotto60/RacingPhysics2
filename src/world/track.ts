@@ -77,8 +77,8 @@ const JUMP = {
   z: -40,
   dirX: 0.9,
   dirZ: -0.44,
-  ramp: 15,
-  height: 1.15,
+  ramp: 12,
+  height: 1.7,
   extent: 24,
 };
 

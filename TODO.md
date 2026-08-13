@@ -24,6 +24,24 @@
 - [x] 9. Tuning harness — full parameter panel, presets, telemetry, friction
       circle visualiser, debug draw, slow motion and single step.
 
+## Verified behaviour
+
+Measured in headless Chromium against the production bundle. These are the
+numbers to compare against if a change makes the car feel different.
+
+| Check | Result |
+|---|---|
+| Wall graze at 5 degrees, 30 m/s, exceptions on | 28.8 m/s out |
+| Same graze, exceptions off | 8.2 m/s out |
+| Head-on wall at 30 m/s | 4.0 m/s out |
+| Cone / tyre stack / barrier / dumpster at 30 m/s | 1.0 / 8.5 / 16.0 / 16.5 m/s lost |
+| LSD locked vs open, hairpin exit | rear wheel spread 5 vs 370 rad/s |
+| Combined slip on vs off, same corner entry | 6 deg vs 88 deg of body slip |
+| Braking load transfer, front vs rear | 6850 N front / 4813 N rear |
+| Debris settled, then left alone | 0.09 m of drift, returns exactly on reset |
+| Pause and single step | sim frozen, one step advances 0.0083 s |
+| Presets | Grippy / Loose / Heavy apply live, including chassis mass |
+
 ## Open questions
 
 - The sandbox this project is built in blocks outbound requests to
