@@ -15,8 +15,10 @@
 
 ## Open questions
 
-- GitHub Pages source must be set to "GitHub Actions" in repository settings
-  for the deploy workflow to publish. Confirm on first run.
+- The sandbox this project is built in blocks outbound requests to
+  `giotto60.github.io`, so the deployed page can only be verified from the
+  Actions deployment result, not by fetching it. The build is verified in a
+  real headless Chromium against the production bundle before every push.
 
 ## Deferred / out of scope requests
 

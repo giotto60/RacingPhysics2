@@ -19,6 +19,9 @@ Assumptions and choices made without asking. Newest first.
 - **Rapier version pinned to the 0.14 line** (`@dimforge/rapier3d-compat`), the
   `compat` build so the WASM is inlined and no separate asset fetch is needed
   on GitHub Pages.
+- **No declared `github-pages` environment on the deploy job.** With it, the
+  job was rejected before it could schedule by an environment protection gate;
+  `deploy-pages` publishes correctly without the declaration.
 - **Placeholder falling boxes** exist in the scaffold purely to prove the loop,
   interpolation and solver are live. They are removed at Milestone 2 when the
   car chassis lands.
