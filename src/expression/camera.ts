@@ -54,6 +54,9 @@ export class ChaseCamera {
       const delta = angleDelta(this.currentYaw, carHeading);
       const k = 1 - Math.pow(0.5, frameDelta / Math.max(0.01, c.yawDamping));
       this.currentYaw += delta * k;
+      // Keep the accumulated angle bounded so it stays readable in telemetry.
+      if (this.currentYaw > Math.PI) this.currentYaw -= Math.PI * 2;
+      else if (this.currentYaw < -Math.PI) this.currentYaw += Math.PI * 2;
     } else {
       this.currentYaw = damp(this.currentYaw, Math.PI * 0.25, 0.25, frameDelta);
     }

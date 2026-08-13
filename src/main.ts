@@ -3,6 +3,7 @@ import { initRapier, PhysicsWorld, defaultPhysicsConfig } from './physics/world'
 import { SceneView, defaultIsoCamera } from './render/scene';
 import { FixedLoop } from './core/loop';
 import { defaultParams } from './core/params';
+import { angleDelta, clamp } from './core/math';
 import { Input } from './core/input';
 import { Car } from './vehicle/car';
 import { CarView } from './vehicle/carView';
@@ -87,15 +88,34 @@ async function boot(): Promise<void> {
 
   // --- fixed-step simulation ---------------------------------------------
 
+  const carHeading = (): number => {
+    const r = car.body.rotation();
+    return new THREE.Euler().setFromQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w), 'YXZ').y;
+  };
+
+  /**
+   * Mode B follows the car, so the raw input is already car-relative. Mode A
+   * keeps the world fixed, which means the input has to be read as a screen
+   * direction: holding left asks the car to head toward screen-left however it
+   * happens to be pointing. That difference is the whole point of the toggle.
+   */
+  const screenRelativeSteer = (raw: number): number => {
+    if (params.camera.mode !== 'A-fixed' || raw === 0) return raw;
+    const phi = camera.yaw;
+    const desiredX = -raw * Math.cos(phi);
+    const desiredZ = raw * Math.sin(phi);
+    const desiredYaw = Math.atan2(-desiredX, -desiredZ);
+    const error = angleDelta(carHeading(), desiredYaw);
+    return clamp(error / (Math.PI / 3), -1, 1) * Math.abs(raw);
+  };
+
   const step = (dt: number): void => {
     input.update(dt);
 
-    // In mode A the world stays put and steering is screen-relative; in mode B
-    // the camera follows the car, so the raw input is already car-relative.
     const carInput = {
       throttle: input.state.throttle,
       brake: input.state.brake,
-      steer: input.state.steer,
+      steer: screenRelativeSteer(input.state.steer),
       reverse: input.state.reverse,
     };
 
@@ -121,15 +141,10 @@ async function boot(): Promise<void> {
     props.render(alpha, view.camera.position);
 
     const lv = car.body.linvel();
-    const rot = car.body.rotation();
-    const heading = new THREE.Euler().setFromQuaternion(
-      new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w),
-      'YXZ',
-    ).y;
     camera.update(
       carView.group.position,
       new THREE.Vector3(lv.x, 0, lv.z),
-      heading + Math.PI,
+      carHeading(),
       frameDelta,
     );
 
