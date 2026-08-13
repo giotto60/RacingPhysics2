@@ -1,9 +1,27 @@
 import * as THREE from 'three';
-import { RAPIER, initRapier, PhysicsWorld, defaultPhysicsConfig } from './physics/world';
-import { createGround } from './physics/ground';
+import { initRapier, PhysicsWorld, defaultPhysicsConfig } from './physics/world';
 import { SceneView, defaultIsoCamera } from './render/scene';
-import { InterpolatedBody } from './render/interpolated';
 import { FixedLoop } from './core/loop';
+import { defaultParams } from './core/params';
+import { Input } from './core/input';
+import { Car } from './vehicle/car';
+import { CarView } from './vehicle/carView';
+import {
+  buildTrack,
+  spawnOnCentreline,
+  SKIDPAD_CENTRE,
+  SURFACE_STRIP_START,
+} from './world/track';
+import { PropWorld } from './world/props';
+import { placeProps } from './world/layout';
+import { CollisionResponse } from './physics/collision';
+import { ChaseCamera } from './expression/camera';
+import { SkidMarks } from './expression/skidmarks';
+import { Particles } from './expression/particles';
+import { GameAudio } from './expression/audio';
+import { TelemetryOverlay } from './debug/telemetry';
+import { FrictionCircles } from './debug/frictionCircle';
+import { DebugDraw } from './debug/draw';
 import { DebugPanel } from './debug/panel';
 
 const PHYSICS_HZ = 120;
@@ -12,122 +30,256 @@ async function boot(): Promise<void> {
   await initRapier();
 
   const container = document.getElementById('app')!;
-  const statsEl = document.getElementById('stats')!;
+  document.getElementById('stats')?.remove();
 
+  const params = defaultParams();
   const view = new SceneView(container, { ...defaultIsoCamera });
   const physics = new PhysicsWorld({ ...defaultPhysicsConfig }, 1 / PHYSICS_HZ);
-  createGround(physics, view.scene);
+  physics.world.integrationParameters.contact_natural_frequency = params.collision.contactFrequency;
 
-  // Placeholder dynamic bodies: they exist only to prove the fixed-step loop,
-  // interpolation and solver are all live. The car replaces them at Milestone 2.
-  const bodies: InterpolatedBody[] = [];
-  const spawnBox = (x: number, y: number, z: number, size: number, colour: number): void => {
-    const body = physics.world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z).setCcdEnabled(true),
-    );
-    physics.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(size, size, size).setFriction(0.9).setRestitution(0.15),
-      body,
-    );
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(size * 2, size * 2, size * 2),
-      new THREE.MeshLambertMaterial({ color: colour }),
-    );
-    view.scene.add(mesh);
-    bodies.push(new InterpolatedBody(body, mesh));
+  const track = buildTrack(physics, view.scene);
+  const spawn = spawnOnCentreline(track.centreline);
+
+  const car = new Car(physics, params, spawn.position, spawn.heading);
+  const carView = new CarView(view.scene, car, params);
+
+  const props = new PropWorld(physics, view.scene, params);
+  placeProps(props, view.scene);
+
+  const collisions = new CollisionResponse(physics, car, props, params);
+  const camera = new ChaseCamera(view, params);
+  const skidMarks = new SkidMarks(view.scene, params);
+  const particles = new Particles(view.scene, params);
+  const audio = new GameAudio(params);
+  const telemetry = new TelemetryOverlay();
+  const frictionCircles = new FrictionCircles();
+  const debugDraw = new DebugDraw(view.scene);
+
+  const input = new Input(params);
+  input.onFirstGesture = () => {
+    audio.start();
+    audio.resume();
   };
 
-  const spawnSet = (): void => {
-    for (const b of bodies) {
-      physics.world.removeRigidBody(b.body);
-      view.scene.remove(b.object);
+  let dilationTimer = 0;
+  let slowMotionLatch = 1;
+
+  collisions.onImpact = (event) => {
+    audio.impact(event.magnitude, event.tier);
+    const c = params.collision;
+    const strength = Math.min(1, event.magnitude / Math.max(1, c.crashThreshold));
+
+    if (event.tier !== 'scuff') {
+      camera.kick(event.normal, strength * 1.6 * c.shakeScale);
+      carView.dent(event.point, event.normal, strength);
     }
-    bodies.length = 0;
-    for (let i = 0; i < 6; i += 1) {
-      spawnBox(
-        Math.cos(i * 1.05) * 3,
-        1.2 + i * 1.5,
-        Math.sin(i * 1.05) * 3,
-        0.5,
-        [0xd35f4f, 0x4f9dd3, 0xd3c14f, 0x6ad34f, 0xa14fd3, 0xd38f4f][i],
-      );
+    if (event.tier === 'scuff') {
+      particles.burst(event.point, 4, 3 + event.tangentialSpeed * 0.25);
+    } else if (event.tier === 'bump') {
+      particles.burst(event.point, 12, 6);
+    } else {
+      particles.burst(event.point, 34, 12, 0xffe0a0);
+      dilationTimer = c.timeDilationDuration;
+    }
+    debugDraw.markContact(event.point);
+    collisions.scatterProps(new THREE.Vector3().copy(carView.group.position));
+  };
+
+  // --- fixed-step simulation ---------------------------------------------
+
+  const step = (dt: number): void => {
+    input.update(dt);
+
+    // In mode A the world stays put and steering is screen-relative; in mode B
+    // the camera follows the car, so the raw input is already car-relative.
+    const carInput = {
+      throttle: input.state.throttle,
+      brake: input.state.brake,
+      steer: input.state.steer,
+      reverse: input.state.reverse,
+    };
+
+    car.step(dt, carInput);
+    collisions.beforeStep();
+    physics.step();
+    collisions.afterStep(dt);
+    props.enforceBudget();
+
+    carView.capture();
+    props.capture();
+    skidMarks.update(car.wheels);
+    particles.updateWheels(car.wheels, dt);
+    particles.step(dt);
+
+    if (dilationTimer > 0) {
+      dilationTimer = Math.max(0, dilationTimer - dt);
     }
   };
-  spawnSet();
 
-  const camTarget = new THREE.Vector3();
-  const scratch = new THREE.Vector3();
+  const render = (alpha: number, frameDelta: number): void => {
+    carView.update(alpha);
+    props.render(alpha, view.camera.position);
 
-  const loop = new FixedLoop(
-    {
-      step: () => {
-        physics.step();
-        for (const b of bodies) b.capture();
-      },
-      render: (alpha) => {
-        camTarget.set(0, 0, 0);
-        for (const b of bodies) {
-          b.apply(alpha);
-          camTarget.add(b.getInterpolatedPosition(alpha, scratch));
-        }
-        if (bodies.length > 0) camTarget.multiplyScalar(1 / bodies.length);
-        view.target.lerp(camTarget, 0.08);
-        view.updateCamera();
-        view.render();
-      },
+    const lv = car.body.linvel();
+    const rot = car.body.rotation();
+    const heading = new THREE.Euler().setFromQuaternion(
+      new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w),
+      'YXZ',
+    ).y;
+    camera.update(
+      carView.group.position,
+      new THREE.Vector3(lv.x, 0, lv.z),
+      heading + Math.PI,
+      frameDelta,
+    );
+
+    telemetry.update(car, loop.stats.fps, loop.stats.stepsLastFrame, physics.world.bodies.len());
+    frictionCircles.update(car);
+    debugDraw.update(car);
+
+    let scrub = 0;
+    let load = 0;
+    for (const w of car.wheels) {
+      if (!w.grounded) continue;
+      const over = Math.max(0, w.utilisation - 0.55);
+      scrub += over;
+      load += over > 0 ? w.load : 0;
+    }
+    audio.update(
+      car.drivetrain.rpm,
+      input.state.throttle,
+      scrub,
+      load,
+      collisions.scrapeIntensity,
+    );
+
+    view.render();
+  };
+
+  const loop = new FixedLoop({ step, render }, PHYSICS_HZ);
+
+  // --- controls -----------------------------------------------------------
+
+  const respawn = (): void => {
+    car.respawn();
+    carView.capture();
+    carView.capture();
+  };
+
+  const fullReset = (): void => {
+    respawn();
+    props.reset();
+    skidMarks.clear();
+    particles.clear();
+    carView.resetDeformation();
+  };
+
+  const teleport = (position: THREE.Vector3, heading: number): void => {
+    car.respawn(new THREE.Vector3(position.x, position.y + 1.1, position.z), heading);
+    carView.capture();
+    carView.capture();
+  };
+
+  const panel = new DebugPanel(params, loop, {
+    onChassisChanged: () => car.applyMassProperties(),
+    onSuspensionGeometryChanged: () => car.refreshGeometry(),
+    onHullChanged: () => carView.rebuildHull(),
+    onPropMassChanged: () => props.refreshAllMassProperties(),
+    onSolverChanged: () => {
+      physics.applySolverConfig();
+      physics.world.integrationParameters.contact_natural_frequency =
+        params.collision.contactFrequency;
     },
-    PHYSICS_HZ,
-  );
+    onPresetApplied: () => {
+      car.applyMassProperties();
+      car.refreshGeometry();
+      carView.rebuildHull();
+      props.refreshAllMassProperties();
+      physics.applySolverConfig();
+    },
+    respawn,
+    fullReset,
+    resetProps: () => props.reset(),
+    clearMarks: () => skidMarks.clear(),
+    teleportSkidPad: () => teleport(SKIDPAD_CENTRE, 0),
+    teleportSurfaceStrip: () => teleport(SURFACE_STRIP_START, 0),
+    toggleTelemetry: () => telemetry.toggle(),
+    toggleFrictionCircles: () => frictionCircles.toggle(),
+    toggleDebugDraw: () => debugDraw.toggle(),
+    singleStep: () => loop.singleStep(1),
+    startAudio: () => {
+      audio.start();
+      audio.resume();
+    },
+  });
 
-  // --- Debug panel -------------------------------------------------------
-  const panel = new DebugPanel();
+  input.onAction = (action) => {
+    switch (action) {
+      case 'respawn':
+        respawn();
+        break;
+      case 'reset':
+        fullReset();
+        break;
+      case 'resetProps':
+        props.reset();
+        break;
+      case 'pause':
+        loop.paused = !loop.paused;
+        break;
+      case 'singleStep':
+        loop.singleStep(1);
+        break;
+      case 'toggleTelemetry':
+        telemetry.toggle();
+        break;
+      case 'toggleDebugDraw':
+        debugDraw.toggle();
+        break;
+      case 'toggleCameraMode':
+        params.camera.mode = params.camera.mode === 'B-follow' ? 'A-fixed' : 'B-follow';
+        panel.refresh();
+        break;
+      case 'slowMotion':
+        slowMotionLatch = slowMotionLatch === 1 ? 0.2 : 1;
+        loop.timeScale = slowMotionLatch;
+        break;
+      default:
+        break;
+    }
+  };
 
-  const sim = panel.folder('Simulation');
-  sim.open();
-  sim.add(loop, 'paused').name('pause');
-  sim.add({ step: () => loop.singleStep(1) }, 'step').name('single step');
-  sim.add(loop, 'timeScale', 0.05, 1, 0.05).name('time scale');
-  sim.add({ reset: spawnSet }, 'reset').name('reset props');
+  // Crash time dilation rides on top of whatever the slow-motion latch is set
+  // to, so a heavy hit reads as a moment of weight without fighting the panel.
+  const applyDilation = (): void => {
+    const target = dilationTimer > 0 ? params.collision.timeDilation : 1;
+    loop.timeScale = Math.min(slowMotionLatch, target);
+    requestAnimationFrame(applyDilation);
+  };
+  applyDilation();
 
-  const phys = panel.folder('Physics');
-  phys
-    .add(physics.config, 'gravity', -30, 0, 0.01)
-    .name('gravity')
-    .onChange(() => physics.applySolverConfig());
-  phys
-    .add(physics.config, 'numSolverIterations', 1, 24, 1)
-    .name('solver iterations')
-    .onChange(() => physics.applySolverConfig());
-  phys
-    .add(physics.config, 'numAdditionalFrictionIterations', 0, 24, 1)
-    .name('friction iterations')
-    .onChange(() => physics.applySolverConfig());
-
-  const cam = panel.folder('Camera');
-  cam
-    .add(view.cameraConfig, 'viewHeight', 8, 80, 0.5)
-    .name('view height')
-    .onChange(() => view.updateProjection());
-  cam.add(view.cameraConfig, 'yaw', -Math.PI, Math.PI, 0.01).name('yaw');
-  cam.add(view.cameraConfig, 'pitch', 0.15, 1.5, 0.01).name('pitch');
-
-  // --- Stats readout -----------------------------------------------------
-  setInterval(() => {
-    const s = loop.stats;
-    statsEl.textContent =
-      `fps      ${s.fps.toFixed(0)}\n` +
-      `steps/fr ${s.stepsLastFrame}\n` +
-      `sim      ${s.simSeconds.toFixed(1)}s @ ${PHYSICS_HZ}Hz\n` +
-      `phys ms  ${s.physicsMs.toFixed(2)}\n` +
-      `rend ms  ${s.renderMs.toFixed(2)}\n` +
-      `bodies   ${physics.world.bodies.len()}`;
-  }, 200);
+  // Handle for headless verification and for poking at state from the console.
+  (window as unknown as Record<string, unknown>).rp2 = {
+    car,
+    params,
+    physics,
+    loop,
+    props,
+    input,
+    collisions,
+    camera,
+    skidMarks,
+    audio,
+  };
 
   loop.start();
 }
 
 boot().catch((err) => {
-  const el = document.getElementById('stats');
-  if (el) el.textContent = `boot failed: ${String(err)}`;
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;left:12px;top:12px;color:#ff8a7a;font:12px ui-monospace,monospace;white-space:pre-wrap';
+  el.textContent = `boot failed: ${String(err)}\n${err instanceof Error ? err.stack : ''}`;
+  document.body.appendChild(el);
   console.error(err);
 });

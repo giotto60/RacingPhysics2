@@ -2,6 +2,65 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## M2-M9 — Vehicle, circuit, collisions, expression, harness
+
+### Conventions
+
+- **Axes.** +Y is up; the car's forward is local -Z and its right is local +X,
+  matching the Three.js default orientation. So the longitudinal axis is Z,
+  the lateral axis is X, and yaw is about Y. Positive steering is a left turn.
+- **Wheel order** is FL, FR, RL, RR everywhere.
+
+### Physics
+
+- **Rapier user forces persist until cleared.** Every force applied to the
+  chassis is reset at the top of each vehicle step; without this the
+  suspension forces accumulate and the car launches into orbit within a
+  second. This cost most of the debugging time on the vehicle and is the
+  single most important thing to remember about this engine.
+- **Wheel spin uses a semi-implicit step.** Near zero slip the tyre is far too
+  stiff for an explicit integrator at 120 Hz: the wheels ring at a standstill
+  and swallow the drive torque. The local slope of the tyre curve is folded
+  into the integrator's denominator. The forces applied to the chassis are
+  unchanged, so this is a stability measure and not a physics fudge.
+- **The differential's torque transfer is capped** at the value that would
+  exactly equalise the two driven wheels within one step. A locking diff is
+  stiff enough to oscillate at 120 Hz otherwise, which shows up as the two
+  driven wheels visibly trading grip several times a second.
+- **The racing surface sits 5 cm proud of the grass.** Coplanar colliders make
+  a suspension ray pick whichever it reaches first, so wheels reported grip at
+  random. The step is small enough that the suspension absorbs it.
+- **Suspension and tyre forces are applied at the contact point**, not at the
+  hardpoint, so weight transfer emerges from the moment arm between the
+  contact patch and the authored centre of mass rather than being scripted.
+- **The suspension ray excludes the chassis rigid body** rather than filtering
+  by collision group, so the car can never catch its own hull.
+
+### Collisions
+
+- **The wall exception restores tangential speed, not tangential impulse.**
+  Correcting the velocity *delta* did not work: most of the speed is actually
+  lost in the following steps as the induced spin makes the tyres scrub. The
+  working version decomposes the car's velocity, keeps the solver's normal
+  component, and rescales the tangential component back toward what the car
+  arrived with. Measured at a five degree graze into a wall at 30 m/s: 28.8
+  m/s out with the exception layer on, 8.2 m/s with it off.
+- **Induced yaw is clamped as a delta**, not as an absolute rate, so ordinary
+  cornering is untouched and only the spin an impact adds is capped.
+- **Prop inertia is authored at the default mass and scaled with it**, so
+  retuning a class's mass in the panel keeps the tumble character intact.
+
+### Expression and harness
+
+- **`lil-gui`** for the panel: folders, live binding, value readout, no build
+  step.
+- **Audio is entirely synthesised** through the Web Audio API and needs a user
+  gesture, so the panel carries an explicit "enable audio" button as well as
+  starting on the first key press.
+- **The debug handle `window.rp2`** exposes the car, params, physics world and
+  props. It is what the headless verification drives, and it is useful from
+  the browser console.
+
 ## M1 — Scaffold
 
 - **Debug UI library: `lil-gui`.** Folders, live binding and value readout are
@@ -14,14 +73,9 @@ Assumptions and choices made without asking. Newest first.
 - **Deploy trigger** fires on `main` and on `claude/**` branches, because the
   repository had no default branch when the scaffold was created and the work
   lives on a `claude/` branch.
-- **Ground is a 2 m thick box collider**, not a plane, so nothing can tunnel
-  through it at speed.
 - **Rapier version pinned to the 0.14 line** (`@dimforge/rapier3d-compat`), the
   `compat` build so the WASM is inlined and no separate asset fetch is needed
   on GitHub Pages.
 - **No declared `github-pages` environment on the deploy job.** With it, the
   job was rejected before it could schedule by an environment protection gate;
   `deploy-pages` publishes correctly without the declaration.
-- **Placeholder falling boxes** exist in the scaffold purely to prove the loop,
-  interpolation and solver are live. They are removed at Milestone 2 when the
-  car chassis lands.
