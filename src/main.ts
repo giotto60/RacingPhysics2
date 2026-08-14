@@ -3,7 +3,6 @@ import { initRapier, PhysicsWorld, defaultPhysicsConfig } from './physics/world'
 import { SceneView, defaultIsoCamera } from './render/scene';
 import { FixedLoop } from './core/loop';
 import { defaultParams } from './core/params';
-import { angleDelta, clamp } from './core/math';
 import { Input } from './core/input';
 import { Car } from './vehicle/car';
 import { CarView } from './vehicle/carView';
@@ -20,6 +19,8 @@ import { ChaseCamera } from './expression/camera';
 import { SkidMarks } from './expression/skidmarks';
 import { Particles } from './expression/particles';
 import { GameAudio } from './expression/audio';
+import { MiniMap } from './expression/minimap';
+import { Speedo } from './expression/speedo';
 import { TelemetryOverlay } from './debug/telemetry';
 import { FrictionCircles } from './debug/frictionCircle';
 import { DebugDraw } from './debug/draw';
@@ -45,16 +46,22 @@ async function boot(): Promise<void> {
   const carView = new CarView(view.scene, car, params);
 
   const props = new PropWorld(physics, view.scene, params);
-  placeProps(props, view.scene);
+  placeProps(props, view.scene, track.centreline);
 
   const collisions = new CollisionResponse(physics, car, props, params);
   const camera = new ChaseCamera(view, params);
   const skidMarks = new SkidMarks(view.scene, params);
   const particles = new Particles(view.scene, params);
   const audio = new GameAudio(params);
+  const speedo = new Speedo();
+  const minimap = new MiniMap(track.centreline);
   const telemetry = new TelemetryOverlay();
   const frictionCircles = new FrictionCircles();
   const debugDraw = new DebugDraw(view.scene);
+  // The diagnostics are opt-in: the default screen carries the speedo and the
+  // map and nothing else.
+  telemetry.toggle();
+  frictionCircles.toggle();
 
   const input = new Input(params);
   input.onFirstGesture = () => {
@@ -93,29 +100,15 @@ async function boot(): Promise<void> {
     return new THREE.Euler().setFromQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w), 'YXZ').y;
   };
 
-  /**
-   * Mode B follows the car, so the raw input is already car-relative. Mode A
-   * keeps the world fixed, which means the input has to be read as a screen
-   * direction: holding left asks the car to head toward screen-left however it
-   * happens to be pointing. That difference is the whole point of the toggle.
-   */
-  const screenRelativeSteer = (raw: number): number => {
-    if (params.camera.mode !== 'A-fixed' || raw === 0) return raw;
-    const phi = camera.yaw;
-    const desiredX = -raw * Math.cos(phi);
-    const desiredZ = raw * Math.sin(phi);
-    const desiredYaw = Math.atan2(-desiredX, -desiredZ);
-    const error = angleDelta(carHeading(), desiredYaw);
-    return clamp(error / (Math.PI / 3), -1, 1) * Math.abs(raw);
-  };
-
   const step = (dt: number): void => {
-    input.update(dt);
+    input.update(dt, car.forwardSpeed);
 
+    // Steering is car-relative in every camera mode: left turns the car left,
+    // whatever the camera happens to be doing.
     const carInput = {
       throttle: input.state.throttle,
       brake: input.state.brake,
-      steer: screenRelativeSteer(input.state.steer),
+      steer: input.state.steer,
       reverse: input.state.reverse,
     };
 
@@ -139,15 +132,20 @@ async function boot(): Promise<void> {
   const render = (alpha: number, frameDelta: number): void => {
     carView.update(alpha);
     props.render(alpha, view.camera.position);
+    view.setDaylight(params.expression.daylight);
 
+    const heading = carHeading();
     const lv = car.body.linvel();
+    camera.rotate(input.state.cameraRotate * 90 * frameDelta);
     camera.update(
       carView.group.position,
       new THREE.Vector3(lv.x, 0, lv.z),
-      carHeading(),
+      heading,
       frameDelta,
     );
 
+    speedo.update(car, params.drivetrain.limiterRPM);
+    minimap.update(carView.group.position, heading);
     telemetry.update(car, loop.stats.fps, loop.stats.stepsLastFrame, physics.world.bodies.len());
     frictionCircles.update(car);
     debugDraw.update(car);
@@ -221,12 +219,21 @@ async function boot(): Promise<void> {
     toggleTelemetry: () => telemetry.toggle(),
     toggleFrictionCircles: () => frictionCircles.toggle(),
     toggleDebugDraw: () => debugDraw.toggle(),
+    toggleMiniMap: () => minimap.toggle(),
     singleStep: () => loop.singleStep(1),
     startAudio: () => {
       audio.start();
       audio.resume();
     },
   });
+
+  // Keep the car centred in the part of the window the panel is not covering.
+  const syncViewOffset = (): void => {
+    view.viewOffsetX = panel.gui.domElement.getBoundingClientRect().width / 2;
+    view.updateProjection();
+  };
+  syncViewOffset();
+  window.addEventListener('resize', syncViewOffset);
 
   input.onAction = (action) => {
     switch (action) {
@@ -285,6 +292,8 @@ async function boot(): Promise<void> {
     camera,
     skidMarks,
     audio,
+    track: track.centreline,
+    view,
   };
 
   loop.start();

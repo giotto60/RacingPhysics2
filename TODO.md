@@ -24,6 +24,22 @@
 - [x] 9. Tuning harness — full parameter panel, presets, telemetry, friction
       circle visualiser, debug draw, slow motion and single step.
 
+## Driving pass
+
+- [x] Reverse on a held brake, with the pedals swapping while reversing.
+- [x] Car framed in the middle of the window the panel does not cover.
+- [x] Arbitrary camera angle in both orientation modes, on sliders and on keys.
+- [x] Steering car-relative in every camera mode.
+- [x] Four launch ramps on the racing line.
+- [x] Racing surface flush with the surrounding ground.
+- [x] Cones, barrels, tyre stacks, crates, barriers and dumpsters on the road.
+- [x] Corner map with the start line and a car marker.
+- [x] Headlights that light the road, plus brake and reverse lights.
+- [x] Rolling resistance an order of magnitude higher, with far more range.
+- [x] Textured road with lane markings, and textured ground.
+- [x] Parked cars in three sizes.
+- [x] Screen reduced to a speedometer and the map; diagnostics are opt-in.
+
 ## Verified behaviour
 
 Measured in headless Chromium against the production bundle. These are the
@@ -41,6 +57,11 @@ numbers to compare against if a change makes the car feel different.
 | Debris settled, then left alone | 0.09 m of drift, returns exactly on reset |
 | Pause and single step | sim frozen, one step advances 0.0083 s |
 | Presets | Grippy / Loose / Heavy apply live, including chassis mass |
+| Reverse from a standstill, brake held | in reverse gear at 3.5 s, -10 m/s at 6 s |
+| Coast-down from 40 m/s | 2.16 m/s^2, top speed still 224 km/h |
+| Ramps, entered at 30 m/s | 0.87 to 1.49 s airborne, 2.9 to 3.6 m peak |
+| Square hit on a parked car at 30 m/s | small 15.1 / saloon 22.5 / van 29.8 m/s lost |
+| Surface strip, one run | tarmac, dirt, grass, gravel, kerb, all five |
 
 ## Open questions
 
@@ -49,8 +70,8 @@ numbers to compare against if a change makes the car feel different.
   Actions deployment result, not by fetching it. The build is verified in a
   real headless Chromium against the production bundle before every push.
 - Camera orientation: mode B (damped yaw follow) is the default and the
-  expected winner, but the toggle is live so both can be compared. The answer
-  is still open until it has been driven properly.
+  expected winner, but the toggle is live so both can be compared, now from
+  any angle. The answer is still open until it has been driven properly.
 
 ## Deferred / out of scope requests
 

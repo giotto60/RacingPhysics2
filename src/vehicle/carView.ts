@@ -23,6 +23,11 @@ export class CarView {
   private euler = new THREE.Euler(0, 0, 0, 'YXZ');
   private tmpQuat = new THREE.Quaternion();
 
+  private headlights: THREE.SpotLight[] = [];
+  private headlightLenses: THREE.MeshPhongMaterial[] = [];
+  private brakeLights: THREE.MeshPhongMaterial[] = [];
+  private reverseLights: THREE.MeshPhongMaterial[] = [];
+
   constructor(
     scene: THREE.Scene,
     private car: Car,
@@ -34,7 +39,12 @@ export class CarView {
     this.chassisGeometry = new THREE.BoxGeometry(c.hullWidth, c.hullHeight, c.hullLength, 6, 4, 12);
     this.chassisMesh = new THREE.Mesh(
       this.chassisGeometry,
-      new THREE.MeshLambertMaterial({ color: colour, flatShading: true }),
+      new THREE.MeshPhongMaterial({
+        color: colour,
+        flatShading: true,
+        shininess: 30,
+        specular: 0x2a2f34,
+      }),
     );
     this.chassisMesh.position.y = c.hullOffsetY;
     this.group.add(this.chassisMesh);
@@ -46,10 +56,12 @@ export class CarView {
     // at a glance, especially when it is travelling sideways.
     const nose = new THREE.Mesh(
       new THREE.BoxGeometry(c.hullWidth * 0.45, c.hullHeight * 0.4, 0.35),
-      new THREE.MeshLambertMaterial({ color: 0xf2e6c8 }),
+      new THREE.MeshPhongMaterial({ color: 0xf2e6c8 }),
     );
     nose.position.set(0, c.hullOffsetY + c.hullHeight * 0.35, -c.hullLength * 0.5 + 0.1);
     this.group.add(nose);
+
+    this.buildLights();
 
     const wheelGeometry = new THREE.CylinderGeometry(
       params.suspension.wheelRadius,
@@ -58,8 +70,8 @@ export class CarView {
       16,
     );
     wheelGeometry.rotateZ(Math.PI / 2);
-    const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x20242a, flatShading: true });
-    const spokeMaterial = new THREE.MeshLambertMaterial({ color: 0xc8ccd2 });
+    const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x20242a, flatShading: true });
+    const spokeMaterial = new THREE.MeshPhongMaterial({ color: 0xc8ccd2 });
 
     for (let i = 0; i < 4; i += 1) {
       const wheelGroup = new THREE.Group();
@@ -81,6 +93,63 @@ export class CarView {
 
     scene.add(this.group);
     this.interpolated = new InterpolatedBody(car.body, this.group);
+  }
+
+  /**
+   * Headlights, brake lights and reverse lights.
+   *
+   * The headlights are real lights rather than glowing decals: from an
+   * overhead camera the pool of light on the road ahead is the only cue that
+   * says which way the car is pointing when it is travelling sideways.
+   */
+  private buildLights(): void {
+    const c = this.params.chassis;
+    const front = -c.hullLength * 0.5;
+    const rear = c.hullLength * 0.5;
+    const y = c.hullOffsetY + c.hullHeight * 0.05;
+
+    for (const side of [-1, 1]) {
+      const lens = new THREE.MeshPhongMaterial({
+        color: 0xfff4d8,
+        emissive: 0xfff0c8,
+        emissiveIntensity: 1,
+      });
+      const lensMesh = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.1), lens);
+      lensMesh.position.set(side * c.hullWidth * 0.32, y + 0.1, front + 0.03);
+      this.group.add(lensMesh);
+      this.headlightLenses.push(lens);
+
+      // A shallow decay keeps the beam readable all the way out to its range
+      // instead of blowing out into a small white puddle by the front bumper.
+      const light = new THREE.SpotLight(0xfff1d2, 7, 46, 0.36, 0.6, 0.55);
+      light.position.set(side * c.hullWidth * 0.32, y + 0.1, front);
+      const target = new THREE.Object3D();
+      target.position.set(side * c.hullWidth * 1.1, -2.2, front - 34);
+      this.group.add(target);
+      light.target = target;
+      this.group.add(light);
+      this.headlights.push(light);
+
+      const brake = new THREE.MeshPhongMaterial({
+        color: 0x8c1a12,
+        emissive: 0xff2a14,
+        emissiveIntensity: 0.12,
+      });
+      const brakeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.08), brake);
+      brakeMesh.position.set(side * c.hullWidth * 0.3, y + 0.14, rear - 0.02);
+      this.group.add(brakeMesh);
+      this.brakeLights.push(brake);
+
+      const reverse = new THREE.MeshPhongMaterial({
+        color: 0x9aa2ab,
+        emissive: 0xf2f6ff,
+        emissiveIntensity: 0,
+      });
+      const reverseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.11, 0.08), reverse);
+      reverseMesh.position.set(side * c.hullWidth * 0.12, y + 0.14, rear - 0.02);
+      this.group.add(reverseMesh);
+      this.reverseLights.push(reverse);
+    }
   }
 
   capture(): void {
@@ -150,6 +219,8 @@ export class CarView {
       this.group.quaternion.setFromEuler(this.euler);
     }
 
+    this.updateLights();
+
     const s = this.params.suspension;
     this.car.wheels.forEach((wheel, i) => {
       const meshGroup = this.wheelMeshes[i];
@@ -159,5 +230,23 @@ export class CarView {
       const spinner = meshGroup.userData.spinner as THREE.Group;
       spinner.rotation.x = -wheel.spin;
     });
+  }
+
+  private updateLights(): void {
+    const e = this.params.expression;
+    const on = e.headlights;
+    for (const light of this.headlights) {
+      light.visible = on;
+      light.intensity = 7 * e.headlightIntensity;
+      light.distance = e.headlightRange;
+    }
+    for (const lens of this.headlightLenses) lens.emissiveIntensity = on ? 1 : 0.05;
+
+    const braking = this.car.brakeInput > 0.02;
+    for (const brake of this.brakeLights) {
+      brake.emissiveIntensity = braking ? 1.2 : on ? 0.28 : 0.08;
+    }
+    const reversing = this.car.drivetrain.gear < 0;
+    for (const reverse of this.reverseLights) reverse.emissiveIntensity = reversing ? 1.2 : 0;
   }
 }

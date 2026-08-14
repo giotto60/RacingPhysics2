@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { angleDelta, clamp, damp } from '../core/math';
+import { angleDelta, clamp, DEG } from '../core/math';
 import type { Params } from '../core/params';
 import type { SceneView } from '../render/scene';
 
@@ -41,6 +41,21 @@ export class ChaseCamera {
     return this.currentYaw;
   }
 
+  /**
+   * Swing the rig round. In the fixed mode this moves the world angle the
+   * camera sits at; in the follow mode it moves the angle the camera trails
+   * the car from, so either view can be watched from any side.
+   */
+  rotate(degrees: number): void {
+    const c = this.params.camera;
+    if (degrees === 0) return;
+    if (c.mode === 'B-follow') {
+      c.followOffset = ((c.followOffset + degrees + 180) % 360 + 360) % 360 - 180;
+    } else {
+      c.fixedYaw = ((c.fixedYaw + degrees + 180) % 360 + 360) % 360 - 180;
+    }
+  }
+
   update(
     carPosition: THREE.Vector3,
     carVelocity: THREE.Vector3,
@@ -50,16 +65,14 @@ export class ChaseCamera {
     const c = this.params.camera;
     const speed = carVelocity.length();
 
-    if (c.mode === 'B-follow') {
-      const delta = angleDelta(this.currentYaw, carHeading);
-      const k = 1 - Math.pow(0.5, frameDelta / Math.max(0.01, c.yawDamping));
-      this.currentYaw += delta * k;
-      // Keep the accumulated angle bounded so it stays readable in telemetry.
-      if (this.currentYaw > Math.PI) this.currentYaw -= Math.PI * 2;
-      else if (this.currentYaw < -Math.PI) this.currentYaw += Math.PI * 2;
-    } else {
-      this.currentYaw = damp(this.currentYaw, Math.PI * 0.25, 0.25, frameDelta);
-    }
+    const following = c.mode === 'B-follow';
+    const desiredYaw = following ? carHeading + c.followOffset * DEG : c.fixedYaw * DEG;
+    const halfLife = following ? c.yawDamping : 0.2;
+    const k = 1 - Math.pow(0.5, frameDelta / Math.max(0.01, halfLife));
+    this.currentYaw += angleDelta(this.currentYaw, desiredYaw) * k;
+    // Keep the accumulated angle bounded so it stays readable in telemetry.
+    if (this.currentYaw > Math.PI) this.currentYaw -= Math.PI * 2;
+    else if (this.currentYaw < -Math.PI) this.currentYaw += Math.PI * 2;
     this.view.cameraConfig.yaw = this.currentYaw;
     this.view.cameraConfig.pitch = c.pitch;
 

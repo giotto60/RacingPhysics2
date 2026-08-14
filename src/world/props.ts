@@ -41,7 +41,9 @@ export type PropKind =
   | 'barrier'
   | 'dumpster'
   | 'wall'
-  | 'dummyCar';
+  | 'carSmall'
+  | 'dummyCar'
+  | 'carLarge';
 
 export interface PropDefinition {
   kind: PropKind;
@@ -57,6 +59,8 @@ export interface PropDefinition {
   com: THREE.Vector3;
   massOf: (p: Params) => number;
   restitutionOf: (p: Params) => number;
+  /** Optional extra meshes parented to the body, purely for silhouette. */
+  detail?: (def: PropDefinition) => THREE.Object3D[];
 }
 
 /** Class colour coding, so the user knows which mass class they just hit. */
@@ -66,6 +70,35 @@ export const CLASS_COLOUR: Record<PropClass, number> = {
   C: 0x9a6ad9,
   D: 0x8d9299,
 };
+
+/**
+ * Cabin and wheels for the parked cars. Cosmetic only -- the collider stays a
+ * single box, because a car-shaped hull would change the mass ladder result for
+ * reasons that have nothing to do with the mass ladder.
+ */
+function carDetail(def: PropDefinition): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(def.size.x * 1.62, def.size.y * 0.95, def.size.z * 1.05),
+    new THREE.MeshPhongMaterial({ color: 0x252b33, flatShading: true }),
+  );
+  cabin.position.set(0, def.size.y * 1.25, def.size.z * 0.14);
+  out.push(cabin);
+
+  const radius = def.size.y * 0.5;
+  const wheel = new THREE.CylinderGeometry(radius, radius, def.size.x * 0.3, 10);
+  wheel.rotateZ(Math.PI / 2);
+  const rubber = new THREE.MeshPhongMaterial({ color: 0x16191d });
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const mesh = new THREE.Mesh(wheel, rubber);
+      mesh.position.set(sx * def.size.x * 0.96, -def.size.y * 0.35, sz * def.size.z * 0.62);
+      out.push(mesh);
+    }
+  }
+  return out;
+}
 
 export const PROP_DEFS: Record<PropKind, PropDefinition> = {
   cone: {
@@ -167,6 +200,19 @@ export const PROP_DEFS: Record<PropKind, PropDefinition> = {
     massOf: () => 0,
     restitutionOf: () => 0.05,
   },
+  carSmall: {
+    kind: 'carSmall',
+    propClass: 'C',
+    size: new THREE.Vector3(0.8, 0.34, 1.8),
+    shape: 'box',
+    material: 'carBody',
+    colour: 0x5f9e7a,
+    inertia: new THREE.Vector3(1080, 1180, 320),
+    com: new THREE.Vector3(0, -0.2, 0),
+    massOf: (p) => p.collision.massCarSmall,
+    restitutionOf: (p) => p.collision.carRestitution,
+    detail: carDetail,
+  },
   dummyCar: {
     kind: 'dummyCar',
     propClass: 'C',
@@ -178,6 +224,22 @@ export const PROP_DEFS: Record<PropKind, PropDefinition> = {
     com: new THREE.Vector3(0, -0.25, 0),
     massOf: (p) => p.collision.massDummyCar,
     restitutionOf: (p) => p.collision.carRestitution,
+    detail: carDetail,
+  },
+  carLarge: {
+    kind: 'carLarge',
+    propClass: 'C',
+    size: new THREE.Vector3(1.05, 0.72, 2.85),
+    shape: 'box',
+    material: 'carBody',
+    colour: 0xc4934a,
+    // A van carries its mass high and long: it pitches and rolls lazily and
+    // takes a lot of speed out of anything that hits it.
+    inertia: new THREE.Vector3(5200, 5600, 1750),
+    com: new THREE.Vector3(0, -0.28, 0),
+    massOf: (p) => p.collision.massCarLarge,
+    restitutionOf: (p) => p.collision.carRestitution,
+    detail: carDetail,
   },
 };
 
@@ -191,7 +253,9 @@ const referenceMass: Record<PropKind, number> = {
   barrier: 900,
   dumpster: 1300,
   wall: 1,
+  carSmall: 950,
   dummyCar: 1200,
+  carLarge: 2600,
 };
 
 export interface PropInstance {
@@ -209,21 +273,32 @@ export interface PropInstance {
 }
 
 function meshFor(def: PropDefinition): THREE.Mesh {
-  const material = new THREE.MeshLambertMaterial({ color: def.colour, flatShading: true });
+  const material = new THREE.MeshPhongMaterial({
+    color: def.colour,
+    flatShading: true,
+    shininess: 12,
+    specular: 0x14181c,
+  });
+  let mesh: THREE.Mesh;
   switch (def.shape) {
     case 'cylinder':
-      return new THREE.Mesh(
+      mesh = new THREE.Mesh(
         new THREE.CylinderGeometry(def.size.x, def.size.x, def.size.y * 2, 14),
         material,
       );
+      break;
     case 'cone':
-      return new THREE.Mesh(new THREE.ConeGeometry(def.size.x, def.size.y * 2, 12), material);
+      mesh = new THREE.Mesh(new THREE.ConeGeometry(def.size.x, def.size.y * 2, 12), material);
+      break;
     default:
-      return new THREE.Mesh(
+      mesh = new THREE.Mesh(
         new THREE.BoxGeometry(def.size.x * 2, def.size.y * 2, def.size.z * 2),
         material,
       );
+      break;
   }
+  for (const child of def.detail?.(def) ?? []) mesh.add(child);
+  return mesh;
 }
 
 function colliderDescFor(def: PropDefinition): RAPIER.ColliderDesc {
@@ -336,7 +411,7 @@ export class PropWorld {
         // Debris tumbling toward the camera occludes exactly what the player
         // needs to see, so fade anything that gets too close to the lens.
         const d = p.mesh.position.distanceTo(cameraPosition);
-        const material = p.mesh.material as THREE.MeshLambertMaterial;
+        const material = p.mesh.material as THREE.MeshPhongMaterial;
         const opacity = d < fade ? Math.max(0.05, d / fade) : 1;
         if (opacity < 1) {
           material.transparent = true;

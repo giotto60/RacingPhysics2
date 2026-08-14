@@ -33,6 +33,16 @@ export class SceneView {
   readonly target = new THREE.Vector3();
 
   zoom = 1;
+  /**
+   * Pixels to slide the visible window right. The tuning panel occupies the
+   * right-hand edge of the window, so without this the car sits under it
+   * instead of in the middle of what the player can actually see.
+   */
+  viewOffsetX = 0;
+
+  private hemi: THREE.HemisphereLight;
+  private key: THREE.DirectionalLight;
+  private daylight = 1;
 
   constructor(container: HTMLElement, cameraConfig: IsoCameraConfig = { ...defaultIsoCamera }) {
     this.cameraConfig = cameraConfig;
@@ -51,11 +61,11 @@ export class SceneView {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
     this.scene.add(this.camera);
 
-    const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x30363c, 1.15);
-    this.scene.add(hemi);
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(30, 60, 20);
-    this.scene.add(key);
+    this.hemi = new THREE.HemisphereLight(0xdfe8f2, 0x30363c, 1.15);
+    this.scene.add(this.hemi);
+    this.key = new THREE.DirectionalLight(0xffffff, 1.1);
+    this.key.position.set(30, 60, 20);
+    this.scene.add(this.key);
 
     this.resize();
     window.addEventListener('resize', this.resize);
@@ -69,14 +79,29 @@ export class SceneView {
   };
 
   updateProjection(): void {
-    const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+    const height = Math.max(1, window.innerHeight);
+    const aspect = window.innerWidth / height;
     const halfH = (this.cameraConfig.viewHeight * this.zoom) * 0.5;
     const halfW = halfH * aspect;
-    this.camera.left = -halfW;
-    this.camera.right = halfW;
+    // Convert the pixel offset into world units at the current zoom, so the
+    // framing stays put as the camera pulls back with speed.
+    const shift = (this.viewOffsetX / height) * this.cameraConfig.viewHeight * this.zoom;
+    this.camera.left = -halfW + shift;
+    this.camera.right = halfW + shift;
     this.camera.top = halfH;
     this.camera.bottom = -halfH;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Scene brightness. Dimming it is what makes the headlights mean anything. */
+  setDaylight(level: number): void {
+    if (level === this.daylight) return;
+    this.daylight = level;
+    this.hemi.intensity = 1.15 * level;
+    this.key.intensity = 1.1 * level;
+    const ground = 0x14181d;
+    const shade = Math.max(0.35, Math.min(1, level));
+    (this.scene.background as THREE.Color).setHex(ground).multiplyScalar(shade);
   }
 
   /** Place the orthographic rig looking at `target` from the configured angles. */

@@ -138,6 +138,11 @@ export interface Params {
     scrubVolume: number;
     impactVolume: number;
     deformation: number;
+    /** Scene brightness, 1 = full daylight. Lower it to see the headlights. */
+    daylight: number;
+    headlights: boolean;
+    headlightIntensity: number;
+    headlightRange: number;
     /** Debris closer to the camera than this fades out so it stops occluding. */
     debrisFadeDistance: number;
     /** Bias applied to prop impulses, pushing them away from the racing line. */
@@ -170,7 +175,9 @@ export interface Params {
     massCrate: number;
     massBarrier: number;
     massDumpster: number;
+    massCarSmall: number;
     massDummyCar: number;
+    massCarLarge: number;
     restitutionCone: number;
     restitutionBarrel: number;
     restitutionTyreStack: number;
@@ -181,6 +188,10 @@ export interface Params {
 
   camera: {
     mode: CameraMode;
+    /** World yaw the fixed camera sits at, degrees. Any angle is valid. */
+    fixedYaw: number;
+    /** Angle the follow camera trails the car from, degrees off its heading. */
+    followOffset: number;
     /** Half-life in seconds for the yaw-follow damping in mode B. */
     yawDamping: number;
     /** Metres of lead per m/s of speed. */
@@ -203,7 +214,7 @@ export const defaultParams = (): Params => ({
     inertiaPitch: 1650,
     inertiaYaw: 1800,
     dragCoefficient: 0.62,
-    rollingResistance: 0.014,
+    rollingResistance: 0.12,
     hullLength: 4.2,
     hullWidth: 1.8,
     hullHeight: 0.8,
@@ -304,6 +315,10 @@ export const defaultParams = (): Params => ({
     scrubVolume: 0.9,
     impactVolume: 0.8,
     deformation: 1.0,
+    daylight: 0.72,
+    headlights: true,
+    headlightIntensity: 1.0,
+    headlightRange: 46,
     debrisFadeDistance: 7,
     debrisScatterBias: 0.35,
   },
@@ -330,7 +345,9 @@ export const defaultParams = (): Params => ({
     massCrate: 70,
     massBarrier: 900,
     massDumpster: 1300,
+    massCarSmall: 950,
     massDummyCar: 1200,
+    massCarLarge: 2600,
     restitutionCone: 0.55,
     restitutionBarrel: 0.3,
     restitutionTyreStack: 0.25,
@@ -341,6 +358,8 @@ export const defaultParams = (): Params => ({
 
   camera: {
     mode: 'B-follow',
+    fixedYaw: 45,
+    followOffset: 0,
     yawDamping: 0.45,
     leadFactor: 0.32,
     pullbackFactor: 0.34,

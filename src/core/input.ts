@@ -12,6 +12,8 @@ export interface InputState {
   /** Raw steering demand, -1 (right) .. +1 (left). */
   steer: number;
   reverse: boolean;
+  /** Held camera rotation demand, -1 .. +1. */
+  cameraRotate: number;
   gamepadConnected: boolean;
 }
 
@@ -32,6 +34,7 @@ export class Input {
     brake: 0,
     steer: 0,
     reverse: false,
+    cameraRotate: 0,
     gamepadConnected: false,
   };
 
@@ -42,6 +45,9 @@ export class Input {
   private keys = new Set<string>();
   private gestureFired = false;
   private steerSmoothed = 0;
+  /** True once the brake has been held at a standstill long enough to back up. */
+  private reverseLatch = false;
+  private reverseHold = 0;
 
   constructor(private params: Params) {
     window.addEventListener('keydown', this.onKeyDown);
@@ -116,7 +122,7 @@ export class Input {
     return signedPow(scaled, this.params.steering.inputCurve);
   }
 
-  update(dt: number): void {
+  update(dt: number, forwardSpeed = 0): void {
     const pads = navigator.getGamepads?.() ?? [];
     let pad: Gamepad | null = null;
     for (const p of pads) {
@@ -155,9 +161,57 @@ export class Input {
     throttle = Math.max(throttle, keyThrottle);
     brake = Math.max(brake, keyBrake);
 
+    const explicitReverse = this.keys.has('ShiftLeft') || (pad?.buttons[2]?.pressed ?? false);
+    [throttle, brake] = this.resolveReverse(throttle, brake, explicitReverse, forwardSpeed, dt);
+
     this.state.throttle = clamp(throttle, 0, 1);
     this.state.brake = clamp(brake, 0, 1);
     this.state.steer = clamp(this.shape(steerRaw), -1, 1);
-    this.state.reverse = this.keys.has('ShiftLeft') || (pad?.buttons[2]?.pressed ?? false);
+    this.state.cameraRotate = this.axisFromKeys(['KeyE'], ['KeyQ']);
+  }
+
+  /**
+   * Reverse works the way every arcade racer's does: hold the brake once the
+   * car has stopped and it backs up, and a dab of throttle while reversing
+   * brakes and then puts it back into drive. Holding the explicit reverse
+   * button forces it regardless.
+   */
+  private resolveReverse(
+    throttle: number,
+    brake: number,
+    explicit: boolean,
+    forwardSpeed: number,
+    dt: number,
+  ): [number, number] {
+    if (explicit) {
+      this.reverseLatch = true;
+      this.reverseHold = 0;
+    } else if (forwardSpeed > 0.8) {
+      this.reverseLatch = false;
+      this.reverseHold = 0;
+    } else if (!this.reverseLatch && brake > 0.2 && forwardSpeed < 0.5) {
+      this.reverseHold += dt;
+      if (this.reverseHold > 0.18) this.reverseLatch = true;
+    } else if (brake <= 0.2) {
+      this.reverseHold = 0;
+    }
+
+    if (!this.reverseLatch) {
+      this.state.reverse = false;
+      return [throttle, brake];
+    }
+
+    // In reverse the pedals swap: brake drives backwards, throttle slows and
+    // then hands control back to first gear.
+    const forwardDemand = throttle;
+    const result: [number, number] = [brake, forwardDemand];
+    if (forwardDemand > 0 && forwardSpeed > -0.5) {
+      this.reverseLatch = false;
+      this.reverseHold = 0;
+      this.state.reverse = false;
+      return [forwardDemand, 0];
+    }
+    this.state.reverse = true;
+    return result;
   }
 }

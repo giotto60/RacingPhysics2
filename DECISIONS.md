@@ -2,6 +2,50 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## Driving pass — controls, framing, circuit and lighting
+
+- **Reverse is the pedal-swap convention**, not a modifier key: hold the brake
+  once the car has stopped and it backs up; a dab of throttle brakes and hands
+  control back to first gear. The explicit reverse button still forces it. The
+  old modifier-only binding worked but nobody would ever find it.
+- **Steering is car-relative in every camera mode.** The fixed camera used to
+  read the input as a screen direction and steer toward it, which meant the
+  steering went dead once the car was already pointed that way and reversed
+  when the target lay behind. Left now turns the car left in both modes; the
+  camera choice no longer changes what the controls mean.
+- **Both camera modes take an arbitrary angle.** The fixed mode has a world
+  angle and the follow mode has an offset off the car's heading, both bound to
+  the panel and to a pair of keys, so any viewpoint can be compared without a
+  code change.
+- **The camera frames the car in the part of the window the panel is not
+  covering**, by sliding the orthographic frustum sideways by half the panel
+  width rather than by moving the look-at target, so the framing survives the
+  speed pull-back.
+- **The racing surface is the zero datum and the grass collider is sunk five
+  centimetres below its own mesh.** The step that used to disambiguate a
+  suspension ray was visible all the way round the circuit; sinking the
+  collider keeps the ray unambiguous while the two surfaces look flush.
+- **Textures are drawn into canvases at boot**, never loaded, so the build
+  stays one self-contained bundle. The road ribbon's u axis spans the track
+  width, which is what lets edge lines and centre dashes be baked into the
+  texture and follow the curve for nothing.
+- **Materials moved from Lambert to Phong.** Lambert shades per vertex, and the
+  road is a two-vertices-wide ribbon, so a headlight would have had nothing to
+  land on. Phong shades per fragment at a cost that does not register here.
+- **Default daylight is below full.** Headlights that cannot be seen are not
+  headlights; the scene sits slightly overcast so the beam reads, and the
+  brightness is a slider for anyone who disagrees.
+- **Rolling resistance defaults roughly ten times a real tyre's**, and its
+  range goes far higher still. Engine braking is on the excluded list, so
+  rolling resistance is the only honest lever left for off-throttle
+  deceleration; it now gives about 2 m/s^2 of coast-down at speed.
+- **Props that are meant to be hit are placed on the racing line** by lap
+  fraction rather than by hand-typed coordinates, so they stay on the road if
+  the layout moves. Only the immovable class stays off it.
+- **Parked cars come in three sizes** with authored inertia each, because one
+  car-shaped mass says nothing about whether the mass ladder reads correctly
+  between vehicles.
+
 ## M2-M9 — Vehicle, circuit, collisions, expression, harness
 
 ### Conventions

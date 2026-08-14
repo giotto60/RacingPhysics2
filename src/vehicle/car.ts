@@ -133,6 +133,9 @@ export class Car {
   bodySlip = 0;
   groundedCount = 0;
   airborneTime = 0;
+  /** Last pedal positions, kept so the lights and the HUD can read them. */
+  throttleInput = 0;
+  brakeInput = 0;
 
   spawnPosition = new THREE.Vector3(0, 1.0, 0);
   spawnHeading = 0;
@@ -257,6 +260,9 @@ export class Car {
     // and drag forces from scratch.
     this.body.resetForces(false);
     this.body.resetTorques(false);
+
+    this.throttleInput = input.throttle;
+    this.brakeInput = input.brake;
 
     const rot = this.body.rotation();
     const quat = scratchQ.set(rot.x, rot.y, rot.z, rot.w);

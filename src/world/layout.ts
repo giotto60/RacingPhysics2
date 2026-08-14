@@ -1,10 +1,15 @@
 import * as THREE from 'three';
-import type { PropWorld, PropClass } from './props';
-import { CLASS_COLOUR } from './props';
+import type { PropWorld, PropClass, PropKind } from './props';
+import { CLASS_COLOUR, PROP_DEFS } from './props';
+import { pointOnTrack } from './track';
 
 /**
- * Where the props go. Everything is placed to be hit deliberately, so the
- * user can compare the four response classes back to back without hunting.
+ * Where the props go.
+ *
+ * Everything that is meant to be hit sits on the racing surface, in the line
+ * the car actually takes: a prop in the runoff is a prop that never gets
+ * tested. Only the immovable class stays off the road, because its job is to
+ * be the thing you bounce off rather than the thing you drive through.
  */
 
 function labelSprite(text: string, colour: number): THREE.Sprite {
@@ -38,47 +43,74 @@ function addLabel(
   scene.add(sprite);
 }
 
-export function placeProps(props: PropWorld, scene: THREE.Scene): void {
-  // --- Class A: cones on the racing line at the chicane exit ------------
-  const chicaneExit = new THREE.Vector3(-28, 0, -50);
-  for (let i = 0; i < 12; i += 1) {
-    const row = Math.floor(i / 4);
-    const col = i % 4;
-    props.spawn(
-      'cone',
-      new THREE.Vector3(chicaneExit.x + col * 2.4 - 3.6, 0.4, chicaneExit.z + row * 3.2 - 3),
-    );
+export function placeProps(
+  props: PropWorld,
+  scene: THREE.Scene,
+  centreline: THREE.Vector3[],
+): void {
+  /** Drop a prop on the road at lap fraction `t`, `lateral` metres off centre. */
+  const onRoad = (
+    kind: PropKind,
+    t: number,
+    lateral: number,
+    alongOffset = 0,
+    yawOffset = 0,
+  ): THREE.Vector3 => {
+    const spot = pointOnTrack(centreline, t + alongOffset / centreline.length, lateral);
+    spot.position.y += PROP_DEFS[kind].size.y + 0.02;
+    props.spawn(kind, spot.position, spot.heading + yawOffset);
+    return spot.position;
+  };
+
+  // --- Class A: cones scattered down the racing line ---------------------
+  let coneAt = new THREE.Vector3();
+  [0.05, 0.44, 0.76].forEach((t, cluster) => {
+    for (let i = 0; i < 10; i += 1) {
+      const row = Math.floor(i / 2);
+      const side = i % 2 === 0 ? -1 : 1;
+      coneAt = onRoad('cone', t, side * (1.4 + row * 0.9), row * 7 + cluster);
+    }
+  });
+  [0.05, 0.44].forEach((t) => {
+    for (let i = 0; i < 2; i += 1) onRoad('sign', t, i === 0 ? -4.8 : 4.8, 24);
+  });
+  addLabel(scene, coneAt, 'A', 'cosmetic');
+
+  // --- Class B: barrels, tyre stacks and crates, all on the road ---------
+  let bAt = new THREE.Vector3();
+  for (let i = 0; i < 8; i += 1) {
+    bAt = onRoad('barrel', 0.54, (i % 2 === 0 ? -1 : 1) * 2.6, i * 6);
+  }
+  for (let i = 0; i < 9; i += 1) {
+    onRoad('tyreStack', 0.7, -4.5 + i * 1.15, i * 2);
+  }
+  for (let i = 0; i < 8; i += 1) {
+    onRoad('crate', 0.86, (i % 2 === 0 ? -3 : 3), i * 5);
+  }
+  addLabel(scene, bAt, 'B', 'consequential');
+
+  // --- Class C: a barrier chicane and dumpsters narrowing the straight ---
+  let cAt = new THREE.Vector3();
+  for (let i = 0; i < 5; i += 1) {
+    cAt = onRoad('barrier', 0.36, -5 + i * 0.4, i * 5, Math.PI * 0.5);
+  }
+  for (let i = 0; i < 5; i += 1) {
+    onRoad('barrier', 0.4, 5 - i * 0.4, i * 5, Math.PI * 0.5);
   }
   for (let i = 0; i < 3; i += 1) {
-    props.spawn('sign', new THREE.Vector3(chicaneExit.x - 8, 0.65, chicaneExit.z + i * 4));
+    onRoad('dumpster', 0.49, i % 2 === 0 ? -3.4 : 3.4, i * 9);
   }
-  addLabel(scene, chicaneExit, 'A', 'cosmetic');
+  addLabel(scene, cAt, 'C', 'movable heavy');
 
-  // --- Class B: tyre stacks and barrels in the hairpin runoff -----------
-  const hairpinRunoff = new THREE.Vector3(-152, 0, -14);
-  for (let i = 0; i < 10; i += 1) {
-    const a = -Math.PI * 0.5 + (i / 9) * Math.PI;
-    props.spawn(
-      'tyreStack',
-      new THREE.Vector3(hairpinRunoff.x + Math.cos(a) * 5, 0.46, hairpinRunoff.z + Math.sin(a) * 15),
-    );
-  }
-  for (let i = 0; i < 6; i += 1) {
-    props.spawn('barrel', new THREE.Vector3(-146, 0.52, -34 - i * 6));
-  }
-  for (let i = 0; i < 6; i += 1) {
-    props.spawn('crate', new THREE.Vector3(-142, 0.48, 8 + i * 2.4));
-  }
-  addLabel(scene, hairpinRunoff, 'B', 'consequential');
-
-  // --- Class C: barriers and dumpsters lining the long straight ---------
-  for (let i = 0; i < 14; i += 1) {
-    props.spawn('barrier', new THREE.Vector3(161, 0.44, 18 - i * 5), Math.PI * 0.5);
-  }
-  for (let i = 0; i < 3; i += 1) {
-    props.spawn('dumpster', new THREE.Vector3(163, 0.7, -60 - i * 10));
-  }
-  addLabel(scene, new THREE.Vector3(163, 0, -10), 'C', 'movable heavy');
+  // --- Parked cars in three sizes, for car-versus-car response -----------
+  const carAt = onRoad('carSmall', 0.11, -3.2, 0);
+  onRoad('carSmall', 0.24, 3.4, 0, 0.3);
+  onRoad('dummyCar', 0.32, -3.6, 0);
+  onRoad('dummyCar', 0.58, 3.2, 0, -0.25);
+  onRoad('dummyCar', 0.9, -2.8, 0);
+  onRoad('carLarge', 0.5, -3.8, 0);
+  onRoad('carLarge', 0.81, 3.6, 0, 0.2);
+  addLabel(scene, carAt, 'C', 'parked cars');
 
   // --- Class D: solid walls around the outside of the hairpin -----------
   for (let i = 0; i < 12; i += 1) {
@@ -88,10 +120,4 @@ export function placeProps(props: PropWorld, scene: THREE.Scene): void {
     props.spawn('wall', new THREE.Vector3(x, 1.25, z), a + Math.PI * 0.5);
   }
   addLabel(scene, new THREE.Vector3(-168, 0, -14), 'D', 'immovable');
-
-  // --- Inert dummy cars, for car-versus-car response --------------------
-  props.spawn('dummyCar', new THREE.Vector3(126, 0.65, 52), Math.PI * 0.25);
-  props.spawn('dummyCar', new THREE.Vector3(156, 0.65, -20), Math.PI * 0.5);
-  props.spawn('dummyCar', new THREE.Vector3(-60, 0.65, 56), -Math.PI * 0.35);
-  addLabel(scene, new THREE.Vector3(-60, 0, 56), 'C', 'dummy car');
 }

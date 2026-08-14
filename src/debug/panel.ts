@@ -25,6 +25,7 @@ export interface PanelHooks {
   toggleTelemetry(): void;
   toggleFrictionCircles(): void;
   toggleDebugDraw(): void;
+  toggleMiniMap(): void;
   singleStep(): void;
   startAudio(): void;
 }
@@ -96,6 +97,7 @@ export class DebugPanel {
     f.add({ go: () => this.hooks.toggleTelemetry() }, 'go').name('telemetry  [t]');
     f.add({ go: () => this.hooks.toggleFrictionCircles() }, 'go').name('friction circles');
     f.add({ go: () => this.hooks.toggleDebugDraw() }, 'go').name('debug draw  [g]');
+    f.add({ go: () => this.hooks.toggleMiniMap() }, 'go').name('map');
     f.add({ go: () => this.hooks.startAudio() }, 'go').name('enable audio');
   }
 
@@ -197,7 +199,7 @@ export class DebugPanel {
     f.add(c, 'inertiaPitch', 200, 5000, 10).name('inertia pitch').onChange(changed);
     f.add(c, 'inertiaYaw', 200, 6000, 10).name('inertia yaw').onChange(changed);
     f.add(c, 'dragCoefficient', 0, 3, 0.01).name('linear drag');
-    f.add(c, 'rollingResistance', 0, 0.08, 0.001).name('rolling resistance');
+    f.add(c, 'rollingResistance', 0, 0.6, 0.005).name('rolling resistance');
     const hull = (): void => this.hooks.onHullChanged();
     f.add(c, 'hullLength', 2, 6, 0.05).name('hull length').onChange(hull);
     f.add(c, 'hullWidth', 1, 3, 0.05).name('hull width').onChange(hull);
@@ -322,6 +324,12 @@ export class DebugPanel {
     f.add(e, 'debrisFadeDistance', 0, 20, 0.5).name('near-camera fade');
     f.add(e, 'debrisScatterBias', 0, 2, 0.01).name('scatter bias');
 
+    const lights = f.addFolder('Lighting');
+    lights.add(e, 'daylight', 0.12, 1.4, 0.01).name('daylight');
+    lights.add(e, 'headlights').name('headlights');
+    lights.add(e, 'headlightIntensity', 0, 4, 0.05).name('headlight brightness');
+    lights.add(e, 'headlightRange', 8, 120, 1).name('headlight range m');
+
     const audio = f.addFolder('Audio');
     audio.add(e, 'audioEnabled').name('enabled');
     audio.add(e, 'masterVolume', 0, 1, 0.01).name('master');
@@ -361,7 +369,9 @@ export class DebugPanel {
     mass.add(c, 'massCrate', 5, 400, 1).name('B crate').onChange(changed);
     mass.add(c, 'massBarrier', 100, 4000, 10).name('C barrier').onChange(changed);
     mass.add(c, 'massDumpster', 100, 5000, 10).name('C dumpster').onChange(changed);
-    mass.add(c, 'massDummyCar', 300, 4000, 10).name('C dummy car').onChange(changed);
+    mass.add(c, 'massCarSmall', 300, 4000, 10).name('C small car').onChange(changed);
+    mass.add(c, 'massDummyCar', 300, 4000, 10).name('C saloon').onChange(changed);
+    mass.add(c, 'massCarLarge', 300, 8000, 10).name('C van').onChange(changed);
 
     const restitution = f.addFolder('Restitution');
     restitution.add(c, 'restitutionCone', 0, 1, 0.01).name('cone').onChange(changed);
@@ -376,6 +386,8 @@ export class DebugPanel {
     const f = this.folder('Camera');
     const c = this.params.camera;
     f.add(c, 'mode', ['A-fixed', 'B-follow']).name('orientation  [c]').listen();
+    f.add(c, 'fixedYaw', -180, 180, 1).name('fixed angle deg  [q/e]').listen();
+    f.add(c, 'followOffset', -180, 180, 1).name('follow angle deg  [q/e]').listen();
     f.add(c, 'yawDamping', 0.02, 2, 0.01).name('yaw damping (B)');
     f.add(c, 'leadFactor', 0, 1.2, 0.01).name('speed lead');
     f.add(c, 'pullbackFactor', 0, 1.5, 0.01).name('speed pull-back');
