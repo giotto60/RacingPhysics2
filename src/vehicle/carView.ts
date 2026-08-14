@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clamp } from '../core/math';
 import type { Params } from '../core/params';
 import type { Car } from './car';
 import { InterpolatedBody } from '../render/interpolated';
@@ -22,6 +23,7 @@ export class CarView {
   private chassisGeometry: THREE.BufferGeometry;
   private euler = new THREE.Euler(0, 0, 0, 'YXZ');
   private tmpQuat = new THREE.Quaternion();
+  private up = new THREE.Vector3();
 
   private headlights: THREE.SpotLight[] = [];
   private headlightLenses: THREE.MeshPhongMaterial[] = [];
@@ -47,6 +49,8 @@ export class CarView {
       }),
     );
     this.chassisMesh.position.y = c.hullOffsetY;
+    this.chassisMesh.castShadow = true;
+    this.chassisMesh.receiveShadow = true;
     this.group.add(this.chassisMesh);
 
     const pos = this.chassisGeometry.getAttribute('position') as THREE.BufferAttribute;
@@ -59,6 +63,7 @@ export class CarView {
       new THREE.MeshPhongMaterial({ color: 0xf2e6c8 }),
     );
     nose.position.set(0, c.hullOffsetY + c.hullHeight * 0.35, -c.hullLength * 0.5 + 0.1);
+    nose.castShadow = true;
     this.group.add(nose);
 
     this.buildLights();
@@ -77,6 +82,7 @@ export class CarView {
       const wheelGroup = new THREE.Group();
       const spinner = new THREE.Group();
       const mesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
+      mesh.castShadow = true;
       spinner.add(mesh);
       // A spoke so the wheel's actual rotation rate is visible, including
       // lockup under braking and spin-up on corner exit.
@@ -123,6 +129,14 @@ export class CarView {
       // instead of blowing out into a small white puddle by the front bumper.
       const light = new THREE.SpotLight(0xfff1d2, 7, 46, 0.36, 0.6, 0.55);
       light.position.set(side * c.hullWidth * 0.32, y + 0.1, front);
+      // A beam that shines through a wall or a parked car reads as painted-on
+      // light rather than as a headlight, so the beam is occluded properly.
+      light.castShadow = true;
+      light.shadow.mapSize.set(1024, 1024);
+      light.shadow.bias = -0.001;
+      light.shadow.normalBias = 0.05;
+      light.shadow.camera.near = 0.4;
+      light.shadow.camera.far = 46;
       const target = new THREE.Object3D();
       target.position.set(side * c.hullWidth * 1.1, -2.2, front - 34);
       this.group.add(target);
@@ -211,12 +225,22 @@ export class CarView {
 
     // Exaggerate roll and pitch about the physics yaw. The simulation stays
     // honest; only the mesh leans further than the body actually does.
+    //
+    // The exaggeration has to fade out as the car leaves upright. Scaling a
+    // roll angle works while the car is on its wheels, but an inverted car
+    // decomposes to roughly 180 degrees, and 180 x 1.75 is a completely
+    // different orientation -- which is why an upside-down car used to hover
+    // over the road at an angle instead of resting on its roof.
     const e = this.params.expression;
     if (e.visualRollMultiplier !== 1 || e.visualPitchMultiplier !== 1) {
-      this.euler.setFromQuaternion(this.group.quaternion, 'YXZ');
-      this.euler.x *= e.visualPitchMultiplier;
-      this.euler.z *= e.visualRollMultiplier;
-      this.group.quaternion.setFromEuler(this.euler);
+      this.up.set(0, 1, 0).applyQuaternion(this.group.quaternion);
+      const upright = clamp((this.up.y - 0.35) / 0.4, 0, 1);
+      if (upright > 0) {
+        this.euler.setFromQuaternion(this.group.quaternion, 'YXZ');
+        this.euler.x += this.euler.x * (e.visualPitchMultiplier - 1) * upright;
+        this.euler.z += this.euler.z * (e.visualRollMultiplier - 1) * upright;
+        this.group.quaternion.setFromEuler(this.euler);
+      }
     }
 
     this.updateLights();
@@ -224,7 +248,12 @@ export class CarView {
     const s = this.params.suspension;
     this.car.wheels.forEach((wheel, i) => {
       const meshGroup = this.wheelMeshes[i];
-      const drop = wheel.grounded ? s.restLength - wheel.compression : s.restLength;
+      // Over-travel counts against the drop as well as compression: when the
+      // suspension has bottomed out the ground is above where the arch can
+      // take the wheel, and drawing it at full bump buries it in the road.
+      const drop = wheel.grounded
+        ? s.restLength - wheel.compression - wheel.overTravel
+        : s.restLength;
       meshGroup.position.set(wheel.hardpoint.x, wheel.hardpoint.y - drop, wheel.hardpoint.z);
       meshGroup.rotation.set(0, wheel.steerAngle, 0);
       const spinner = meshGroup.userData.spinner as THREE.Group;
@@ -239,6 +268,11 @@ export class CarView {
       light.visible = on;
       light.intensity = 7 * e.headlightIntensity;
       light.distance = e.headlightRange;
+      light.castShadow = on && e.headlightShadows;
+      if (light.shadow.camera.far !== e.headlightRange) {
+        light.shadow.camera.far = e.headlightRange;
+        light.shadow.camera.updateProjectionMatrix();
+      }
     }
     for (const lens of this.headlightLenses) lens.emissiveIntensity = on ? 1 : 0.05;
 

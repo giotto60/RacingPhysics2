@@ -12,6 +12,13 @@ export interface DrivetrainState {
   gear: number; // -1 reverse, 0 neutral, 1..n forward
   rpm: number;
   shiftTimer: number;
+  /** Seconds before another shift is allowed. */
+  shiftHold: number;
+  /**
+   * Smoothed wheel speed implied by how fast the car is actually travelling,
+   * rad/s. The shift schedule runs off this rather than off the driven wheels.
+   */
+  roadOmega: number;
   engineTorque: number;
   /** Torque delivered to each wheel this step, FL FR RL RR. */
   wheelTorque: [number, number, number, number];
@@ -21,6 +28,8 @@ export const createDrivetrainState = (): DrivetrainState => ({
   gear: 1,
   rpm: 900,
   shiftTimer: 0,
+  shiftHold: 0,
+  roadOmega: 0,
   engineTorque: 0,
   wheelTorque: [0, 0, 0, 0],
 });
@@ -130,14 +139,44 @@ export function updateDrivetrain(
   state.rpm = clamp(Math.max(rpmFromWheels, d.idleRPM), d.idleRPM, d.limiterRPM);
 
   // --- automatic shifting ------------------------------------------------
+  //
+  // The schedule deliberately does not use the engine speed above. That figure
+  // follows the driven wheels, so a wheel spinning up on a wet start or a
+  // gravel exit calls for second, the upshift kills the wheelspin, the wheels
+  // drop back and it calls for first again: the box hunts several times a
+  // second. Road speed cannot do that, because it is what the car is really
+  // doing rather than what the tyres are doing to the road.
+  const roadOmegaNow = Math.abs(input.forwardSpeed) / Math.max(0.05, input.wheelRadius);
+  state.roadOmega += (roadOmegaNow - state.roadOmega) * clamp(input.dt * 10, 0, 1);
+  const rpmInGear = (gear: number): number =>
+    Math.abs(state.roadOmega * gearRatio(params, gear) * d.finalDrive) * (60 / (2 * Math.PI));
+
   state.shiftTimer = Math.max(0, state.shiftTimer - input.dt);
-  if (state.gear > 0 && state.shiftTimer === 0) {
-    if (state.rpm >= d.shiftUpRPM && state.gear < d.gearRatios.length) {
-      state.gear += 1;
+  state.shiftHold = Math.max(0, state.shiftHold - input.dt);
+  if (state.gear > 0 && state.shiftTimer === 0 && state.shiftHold === 0) {
+    const here = rpmInGear(state.gear);
+    const hysteresis = Math.max(0, d.shiftHysteresisRPM);
+    const shift = (to: number): void => {
+      state.gear = to;
       state.shiftTimer = d.shiftCutTime;
-    } else if (state.rpm <= d.shiftDownRPM && state.gear > 1) {
-      state.gear -= 1;
-      state.shiftTimer = d.shiftCutTime;
+      state.shiftHold = d.shiftHoldTime;
+    };
+
+    // The guard bands are derived from the ratios themselves rather than being
+    // a fixed rpm margin, so any gear set stays stable: a shift is only allowed
+    // if the gear it lands in would not immediately ask to shift back. The
+    // limiter and the idle floor override it, because sitting on either is
+    // worse than one shift the guard would rather not have made.
+    const canUp = state.gear < d.gearRatios.length;
+    const canDown = state.gear > 1;
+    if (canUp && here >= d.shiftUpRPM) {
+      if (rpmInGear(state.gear + 1) >= d.shiftDownRPM + hysteresis || state.rpm >= d.limiterRPM - 50) {
+        shift(state.gear + 1);
+      }
+    } else if (canDown && here <= d.shiftDownRPM) {
+      if (rpmInGear(state.gear - 1) <= d.shiftUpRPM - hysteresis || here <= d.idleRPM) {
+        shift(state.gear - 1);
+      }
     }
   }
 

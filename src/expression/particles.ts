@@ -89,7 +89,10 @@ export class Particles {
       const loose = surfaceIsLoose[wheel.surface];
       const slip = wheel.utilisation;
       const threshold = loose ? 0.12 : 0.45;
-      if (slip < threshold) {
+      // Utilisation says how hard the tyre is working; only sliding speed says
+      // whether anything is actually being scuffed off the surface. A car
+      // holding station on gravel is working its tyres and throwing nothing.
+      if (slip < threshold || wheel.slipSpeed < p.minSlipSpeed) {
         this.emitAccumulator[i] = 0;
         return;
       }

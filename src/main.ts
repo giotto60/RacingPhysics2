@@ -133,6 +133,7 @@ async function boot(): Promise<void> {
     carView.update(alpha);
     props.render(alpha, view.camera.position);
     view.setDaylight(params.expression.daylight);
+    view.setShadows(params.expression.shadows);
 
     const heading = carHeading();
     const lv = car.body.linvel();
@@ -283,6 +284,7 @@ async function boot(): Promise<void> {
   // Handle for headless verification and for poking at state from the console.
   (window as unknown as Record<string, unknown>).rp2 = {
     car,
+    carView,
     params,
     physics,
     loop,

@@ -28,7 +28,11 @@ export interface Params {
     inertiaYaw: number;
     /** Quadratic drag: F = -k |v| v. Sets natural top speed. */
     dragCoefficient: number;
-    /** Constant off-throttle deceleration, newtons per newton of vertical load. */
+    /**
+     * Rolling resistance coefficient: newtons of retarding force per newton of
+     * vertical load. Applied as a torque at the wheel rather than a force at
+     * the contact patch -- see `Car.integrateWheel` for why that matters.
+     */
     rollingResistance: number;
     hullLength: number;
     hullWidth: number;
@@ -47,6 +51,13 @@ export interface Params {
     hardpointY: number;
     restLength: number;
     maxTravel: number;
+    /**
+     * Rate of the rubber bump stop the suspension hits at full travel, N/m.
+     * Without one the spring simply saturates and the chassis sinks into the
+     * road on a hard landing.
+     */
+    bumpStopStiffness: number;
+    bumpStopDamping: number;
     stiffnessFront: number;
     stiffnessRear: number;
     dampingFront: number;
@@ -94,6 +105,10 @@ export interface Params {
     shiftUpRPM: number;
     shiftDownRPM: number;
     shiftCutTime: number;
+    /** Guard band the next gear's rpm must clear before a shift is allowed. */
+    shiftHysteresisRPM: number;
+    /** Minimum seconds between two shifts. */
+    shiftHoldTime: number;
     drivelineEfficiency: number;
     brakeTorqueFront: number;
     brakeTorqueRear: number;
@@ -132,6 +147,12 @@ export interface Params {
     skidThreshold: number;
     skidOpacity: number;
     dustRate: number;
+    /**
+     * Contact-patch sliding speed a tyre must actually reach before it marks
+     * or sprays, m/s. Grip utilisation alone goes high at a crawl, which is
+     * how a stationary car ends up throwing gravel.
+     */
+    minSlipSpeed: number;
     audioEnabled: boolean;
     masterVolume: number;
     engineVolume: number;
@@ -140,6 +161,10 @@ export interface Params {
     deformation: number;
     /** Scene brightness, 1 = full daylight. Lower it to see the headlights. */
     daylight: number;
+    /** Sun shadows: what makes the key light stop at solid objects. */
+    shadows: boolean;
+    /** Headlight beams occluded by whatever they hit. Costs two shadow passes. */
+    headlightShadows: boolean;
     headlights: boolean;
     headlightIntensity: number;
     headlightRange: number;
@@ -230,6 +255,8 @@ export const defaultParams = (): Params => ({
     hardpointY: -0.2,
     restLength: 0.35,
     maxTravel: 0.25,
+    bumpStopStiffness: 420000,
+    bumpStopDamping: 9000,
     stiffnessFront: 45000,
     stiffnessRear: 42000,
     dampingFront: 4000,
@@ -273,6 +300,8 @@ export const defaultParams = (): Params => ({
     shiftUpRPM: 7000,
     shiftDownRPM: 3000,
     shiftCutTime: 0.09,
+    shiftHysteresisRPM: 600,
+    shiftHoldTime: 0.55,
     drivelineEfficiency: 0.9,
     brakeTorqueFront: 3600,
     brakeTorqueRear: 2400,
@@ -309,6 +338,7 @@ export const defaultParams = (): Params => ({
     skidThreshold: 0.22,
     skidOpacity: 0.85,
     dustRate: 1.0,
+    minSlipSpeed: 1.2,
     audioEnabled: true,
     masterVolume: 0.7,
     engineVolume: 0.5,
@@ -316,6 +346,8 @@ export const defaultParams = (): Params => ({
     impactVolume: 0.8,
     deformation: 1.0,
     daylight: 0.72,
+    shadows: true,
+    headlightShadows: true,
     headlights: true,
     headlightIntensity: 1.0,
     headlightRange: 46,
@@ -331,7 +363,9 @@ export const defaultParams = (): Params => ({
     suppressVerticalImpulse: true,
     maxInducedYawRate: 1.1,
     carRestitution: 0.08,
-    contactFrequency: 24,
+    // Stiff enough that a hard landing does not push the hull into the road
+    // before the solver catches it.
+    contactFrequency: 55,
     scuffThreshold: 1500,
     bumpThreshold: 12000,
     crashThreshold: 45000,

@@ -297,7 +297,12 @@ function meshFor(def: PropDefinition): THREE.Mesh {
       );
       break;
   }
-  for (const child of def.detail?.(def) ?? []) mesh.add(child);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  for (const child of def.detail?.(def) ?? []) {
+    child.castShadow = true;
+    mesh.add(child);
+  }
   return mesh;
 }
 

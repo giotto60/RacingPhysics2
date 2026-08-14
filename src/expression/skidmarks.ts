@@ -74,7 +74,9 @@ export class SkidMarks {
     wheels.forEach((wheel, i) => {
       const laysRubber = wheel.grounded && !surfaceIsLoose[wheel.surface];
       const slip = wheel.utilisation;
-      if (!laysRubber || slip < p.skidThreshold) {
+      // Rubber is left behind by rubber sliding, so the contact patch has to be
+      // moving over the road, not merely loaded up.
+      if (!laysRubber || slip < p.skidThreshold || wheel.slipSpeed < p.minSlipSpeed) {
         this.lastPoint[i] = null;
         return;
       }

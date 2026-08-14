@@ -18,6 +18,9 @@ export interface IsoCameraConfig {
   distance: number;
 }
 
+/** Where the sun sits relative to whatever the camera is looking at. */
+const KEY_LIGHT_OFFSET = new THREE.Vector3(38, 76, 25);
+
 export const defaultIsoCamera: IsoCameraConfig = {
   viewHeight: 26,
   yaw: Math.PI * 0.25,
@@ -42,6 +45,8 @@ export class SceneView {
 
   private hemi: THREE.HemisphereLight;
   private key: THREE.DirectionalLight;
+  private keyTarget = new THREE.Object3D();
+  private shadowHalfExtent = 0;
   private daylight = 1;
 
   constructor(container: HTMLElement, cameraConfig: IsoCameraConfig = { ...defaultIsoCamera }) {
@@ -52,7 +57,11 @@ export class SceneView {
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = false;
+    // Left permanently on: toggling it at runtime forces every material in the
+    // scene to recompile, so the switch in the panel moves `castShadow` on the
+    // lights instead, which three.js handles by itself.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
@@ -64,8 +73,19 @@ export class SceneView {
     this.hemi = new THREE.HemisphereLight(0xdfe8f2, 0x30363c, 1.15);
     this.scene.add(this.hemi);
     this.key = new THREE.DirectionalLight(0xffffff, 1.1);
-    this.key.position.set(30, 60, 20);
+    this.key.position.copy(KEY_LIGHT_OFFSET);
+    this.key.castShadow = true;
+    // The shadow map covers only what the camera can see, and follows it, so a
+    // 2k map buys centimetre-scale detail instead of being spread over a
+    // kilometre of track that is not on screen.
+    this.key.shadow.mapSize.set(2048, 2048);
+    this.key.shadow.bias = -0.0004;
+    this.key.shadow.normalBias = 0.06;
+    this.key.shadow.camera.near = 1;
+    this.key.shadow.camera.far = 240;
     this.scene.add(this.key);
+    this.scene.add(this.keyTarget);
+    this.key.target = this.keyTarget;
 
     this.resize();
     window.addEventListener('resize', this.resize);
@@ -93,6 +113,11 @@ export class SceneView {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Sun shadows on or off. Cheap to toggle; the shadow map itself stays on. */
+  setShadows(enabled: boolean): void {
+    this.key.castShadow = enabled;
+  }
+
   /** Scene brightness. Dimming it is what makes the headlights mean anything. */
   setDaylight(level: number): void {
     if (level === this.daylight) return;
@@ -115,6 +140,30 @@ export class SceneView {
     );
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.target);
+    this.updateShadowFrustum();
+  }
+
+  /**
+   * March the sun along with the view. A directional light's shadow needs a
+   * bounded volume, so it tracks the camera target and is sized from the
+   * visible width, which keeps the whole screen shadowed at any zoom.
+   */
+  private updateShadowFrustum(): void {
+    this.key.position.copy(this.target).add(KEY_LIGHT_OFFSET);
+    this.keyTarget.position.copy(this.target);
+
+    const half = Math.max(30, (this.camera.right - this.camera.left) * 0.6);
+    // Only rebuild the projection when it has moved enough to matter: the
+    // camera pulls back continuously with speed and the frustum does not need
+    // to follow every centimetre of it.
+    if (Math.abs(half - this.shadowHalfExtent) < 2) return;
+    this.shadowHalfExtent = half;
+    const cam = this.key.shadow.camera;
+    cam.left = -half;
+    cam.right = half;
+    cam.top = half;
+    cam.bottom = -half;
+    cam.updateProjectionMatrix();
   }
 
   render(): void {

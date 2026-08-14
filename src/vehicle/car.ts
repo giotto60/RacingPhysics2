@@ -38,9 +38,15 @@ export interface WheelState {
   side: number;
 
   grounded: boolean;
-  /** Spring compression, metres. */
+  /** Spring compression, metres. Clamped to the available travel. */
   compression: number;
   compressionVelocity: number;
+  /**
+   * Metres the ground intrudes past full bump. Non-zero means the suspension
+   * has run out of travel and the bump stop is carrying the wheel.
+   */
+  overTravel: number;
+  overTravelVelocity: number;
   /** Anti-roll bar contribution to this wheel's load, newtons. */
   antiRoll: number;
   /** Vertical load through this tyre, newtons. This explains most handling. */
@@ -49,6 +55,8 @@ export interface WheelState {
 
   slipAngle: number;
   slipRatio: number;
+  /** How fast the contact patch is actually sliding over the ground, m/s. */
+  slipSpeed: number;
   /** Combined demand as a fraction of available grip. */
   utilisation: number;
   /** Normalised demand before the friction circle clamps it, for the plots. */
@@ -77,11 +85,14 @@ const createWheelState = (hardpoint: THREE.Vector3, isFront: boolean, side: numb
   grounded: false,
   compression: 0,
   compressionVelocity: 0,
+  overTravel: 0,
+  overTravelVelocity: 0,
   antiRoll: 0,
   load: 0,
   surface: 'tarmac',
   slipAngle: 0,
   slipRatio: 0,
+  slipSpeed: 0,
   utilisation: 0,
   demandLong: 0,
   demandLat: 0,
@@ -110,6 +121,21 @@ const scratchA = new THREE.Vector3();
 const scratchB = new THREE.Vector3();
 const scratchC = new THREE.Vector3();
 const scratchQ = new THREE.Quaternion();
+
+/**
+ * A ray hit only counts as ground if the surface faces up. Without this a ray
+ * that catches a wall -- the back of the jump, the side of a kerb -- reports a
+ * grounded wheel and the suspension pushes the car sideways off it.
+ */
+const MIN_CONTACT_NORMAL_Y = 0.2;
+/**
+ * How far the ground may intrude past full suspension travel before the car is
+ * lifted clear of it. The bump stop absorbs anything gentler; this is the last
+ * line of defence that stops a hard landing leaving the hull inside the road.
+ */
+const PENETRATION_ALLOWANCE = 0.06;
+/** Ceiling on a single step's positional correction, metres. */
+const MAX_PENETRATION_RECOVERY = 0.15;
 
 /**
  * The player car.
@@ -236,9 +262,15 @@ export class Car {
       w.gripState = 1;
       w.compression = 0;
       w.compressionVelocity = 0;
+      w.overTravel = 0;
+      w.overTravelVelocity = 0;
+      w.slipSpeed = 0;
     }
     this.drivetrain.gear = 1;
     this.drivetrain.rpm = this.params.drivetrain.idleRPM;
+    this.drivetrain.shiftTimer = 0;
+    this.drivetrain.shiftHold = 0;
+    this.drivetrain.roadOmega = 0;
     this.steering.actual = 0;
   }
 
@@ -298,7 +330,7 @@ export class Car {
       dt,
     });
 
-    this.applySuspensionForces(up);
+    this.applySuspensionForces();
     this.applyTyreForces(quat, up, input, dt);
     this.applyDragAndResistance(velocity);
     this.applyAirborne(input, forward, right, up, dt);
@@ -335,23 +367,88 @@ export class Car {
       );
 
       const previousCompression = wheel.compression;
-      if (hit && hit.timeOfImpact <= maxLength) {
+      const previousOverTravel = wheel.overTravel;
+
+      // A trimesh reports the winding's normal, which can face either way
+      // along the ray. Flip it so it always points back at the wheel, then
+      // only accept it if the surface is something a wheel could rest on.
+      let hitNormalY = 0;
+      if (hit) {
+        scratchC.set(hit.normal.x, hit.normal.y, hit.normal.z);
+        if (scratchC.dot(down) > 0) scratchC.multiplyScalar(-1);
+        hitNormalY = scratchC.y;
+      }
+
+      if (hit && hit.timeOfImpact <= maxLength && hitNormalY > MIN_CONTACT_NORMAL_Y) {
         wheel.grounded = true;
         this.groundedCount += 1;
-        wheel.compression = clamp(maxLength - hit.timeOfImpact, 0, s.maxTravel);
+        // The raw figure can exceed the available travel: that is the ground
+        // intruding into the wheel arch, and it has to be kept rather than
+        // clamped away, because it is the only measure of how far the car has
+        // sunk into the surface.
+        const raw = maxLength - hit.timeOfImpact;
+        wheel.compression = clamp(raw, 0, s.maxTravel);
+        wheel.overTravel = Math.max(0, raw - s.maxTravel);
         wheel.contactPoint.copy(origin).addScaledVector(down, hit.timeOfImpact);
-        wheel.contactNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
+        wheel.contactNormal.copy(scratchC).normalize();
         wheel.wheelCentre.copy(wheel.contactPoint).addScaledVector(up, s.wheelRadius);
         wheel.surface = surfaceOf(hit.collider.handle);
       } else {
         wheel.grounded = false;
         wheel.compression = 0;
+        wheel.overTravel = 0;
         wheel.contactPoint.copy(origin).addScaledVector(down, maxLength);
         wheel.contactNormal.set(0, 1, 0);
         wheel.wheelCentre.copy(origin).addScaledVector(down, s.restLength);
         wheel.load = 0;
       }
       wheel.compressionVelocity = dt > 0 ? (wheel.compression - previousCompression) / dt : 0;
+      wheel.overTravelVelocity = dt > 0 ? (wheel.overTravel - previousOverTravel) / dt : 0;
+    }
+
+    this.resolveGroundPenetration(up);
+  }
+
+  /**
+   * Last line of defence against the car ending up inside the scenery.
+   *
+   * The bump stop deals with an ordinary heavy landing. This catches the cases
+   * it cannot: a landing that arrives faster than the solver can answer, or a
+   * tumble that drops the car onto the back of the jump. Once the ground is
+   * further past full bump than the allowance, the body is lifted along its own
+   * up axis and the velocity driving it into the surface is removed, so it
+   * cannot simply sink again on the next step.
+   */
+  private resolveGroundPenetration(up: THREE.Vector3): void {
+    let worst = 0;
+    for (const wheel of this.wheels) {
+      if (wheel.grounded && wheel.overTravel > worst) worst = wheel.overTravel;
+    }
+    if (worst <= PENETRATION_ALLOWANCE) return;
+
+    const lift = Math.min(worst - PENETRATION_ALLOWANCE, MAX_PENETRATION_RECOVERY);
+    const t = this.body.translation();
+    this.body.setTranslation(
+      { x: t.x + up.x * lift, y: t.y + up.y * lift, z: t.z + up.z * lift },
+      true,
+    );
+
+    const lv = this.body.linvel();
+    const into = lv.x * up.x + lv.y * up.y + lv.z * up.z;
+    if (into < 0) {
+      this.body.setLinvel(
+        { x: lv.x - up.x * into, y: lv.y - up.y * into, z: lv.z - up.z * into },
+        true,
+      );
+    }
+
+    // Keep this step's bookkeeping consistent with the body that just moved,
+    // so the suspension forces are applied at the corrected contact points.
+    for (const wheel of this.wheels) {
+      if (!wheel.grounded) continue;
+      wheel.overTravel = Math.max(0, wheel.overTravel - lift);
+      wheel.contactPoint.addScaledVector(up, lift);
+      wheel.wheelCentre.addScaledVector(up, lift);
     }
   }
 
@@ -371,7 +468,7 @@ export class Car {
     apply(this.wheels[2], this.wheels[3], s.antiRollRear);
   }
 
-  private applySuspensionForces(up: THREE.Vector3): void {
+  private applySuspensionForces(): void {
     const s = this.params.suspension;
     for (const wheel of this.wheels) {
       if (!wheel.grounded) {
@@ -385,8 +482,26 @@ export class Car {
       const damper = damping * wheel.compressionVelocity;
       const total = clamp(spring + damper + wheel.antiRoll, 0, s.maxForce);
 
-      wheel.load = total;
-      wheel.springForce.copy(up).multiplyScalar(total);
+      // Bump stop. Past full travel the spring has nothing left to give, so
+      // without a stop here the chassis simply keeps descending until the hull
+      // collider is inside the road.
+      const bump =
+        wheel.overTravel > 0
+          ? Math.min(
+              s.bumpStopStiffness * wheel.overTravel +
+                s.bumpStopDamping * Math.max(0, wheel.overTravelVelocity),
+              s.maxForce * 4,
+            )
+          : 0;
+
+      // Grip is decided by the load the tyre carries, and a bottomed suspension
+      // really does put the bump stop's force through it -- but only up to a
+      // point, or a landing would hand the car impossible grip for one step.
+      wheel.load = Math.min(total + bump, s.maxForce * 1.5);
+      // Along the contact normal, not the chassis up axis. Tied to the chassis
+      // it develops a horizontal component the moment the car pitches, which at
+      // a standstill is a force with nothing to oppose it: the car creeps.
+      wheel.springForce.copy(wheel.contactNormal).multiplyScalar(total + bump);
       this.body.addForceAtPoint(
         { x: wheel.springForce.x, y: wheel.springForce.y, z: wheel.springForce.z },
         { x: wheel.contactPoint.x, y: wheel.contactPoint.y, z: wheel.contactPoint.z },
@@ -437,6 +552,7 @@ export class Car {
       if (!wheel.grounded) {
         wheel.slipAngle = 0;
         wheel.slipRatio = 0;
+        wheel.slipSpeed = 0;
         wheel.utilisation = 0;
         wheel.demandLong = 0;
         wheel.demandLat = 0;
@@ -453,8 +569,13 @@ export class Car {
       const vLat = pointVelocity.dot(wheel.right);
 
       const slipReference = Math.max(Math.abs(vLong), 2.0);
-      wheel.slipRatio = clamp((wheel.omega * radius - vLong) / slipReference, -2, 2);
+      const longSlipSpeed = wheel.omega * radius - vLong;
+      wheel.slipRatio = clamp(longSlipSpeed / slipReference, -2, 2);
       wheel.slipAngle = Math.atan2(vLat, Math.max(Math.abs(vLong), 1.2));
+      // The honest quantity: how fast the rubber is being dragged across the
+      // ground. Slip ratio and angle are both normalised, so they read high at
+      // walking pace where nothing is really sliding.
+      wheel.slipSpeed = Math.hypot(longSlipSpeed, vLat);
 
       const surfaceMultiplier = p.tyre.surfaceGrip[wheel.surface] ?? 1;
       const mu =
@@ -480,13 +601,13 @@ export class Car {
       wheel.demandLat = fyRaw;
       wheel.gripState = updateGripState(p, wheel.gripState, demand.utilisation, dt);
 
-      let fx = demand.fx * capacity;
+      // Rolling resistance is deliberately absent here: it is a torque at the
+      // wheel, applied in `integrateWheel`. Subtracted from the contact force
+      // it would go straight back into the wheel's own equation of motion, the
+      // wheel would spin up until the tyre cancelled it exactly, and the car
+      // would feel nothing at all however high the coefficient went.
+      const fx = demand.fx * capacity;
       const fy = demand.fy * capacity;
-
-      // Rolling resistance: a constant low-level drag whenever the wheel rolls.
-      if (Math.abs(vLong) > 0.05) {
-        fx -= Math.sign(vLong) * p.chassis.rollingResistance * wheel.load;
-      }
 
       wheel.longitudinalForce.copy(wheel.forward).multiplyScalar(fx);
       wheel.lateralForce.copy(wheel.right).multiplyScalar(fy);
@@ -541,6 +662,27 @@ export class Car {
     // the chassis.
     const damping = 1 + (dt * radius * radius * Math.max(0, forceGradient)) / inertia;
     let omega = wheel.omega + ((net / inertia) * dt) / damping;
+
+    // Rolling resistance belongs here, as a torque, because that is what it
+    // physically is: carcass hysteresis resisting rotation. The wheel slows,
+    // the slip ratio goes slightly negative, and the tyre drags the car back
+    // through the contact patch -- so the coefficient reaches the chassis
+    // instead of being cancelled out. It is also what holds a parked car
+    // still, since a wheel it has stopped resists being turned again.
+    //
+    // It goes through the same denominator as the drive torque above. Outside
+    // it, the tyre force it works against is damped and it is not, so the
+    // retarding force would come out speed-dependent -- several times the
+    // coefficient at walking pace, enough to stop the car pulling away at all.
+    const rolling = wheel.grounded
+      ? Math.max(0, p.chassis.rollingResistance) * wheel.load * radius
+      : 0;
+    if (rolling > 0) {
+      const delta = ((rolling / inertia) * dt) / damping;
+      if (Math.abs(omega) <= delta) omega = 0;
+      else omega -= Math.sign(omega) * delta;
+    }
+
     // Braking can bring a wheel to a stop but never drive it backwards.
     if (brakeTorque > 0) {
       const brakeDelta = (brakeTorque / inertia) * dt;

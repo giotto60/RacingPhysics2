@@ -219,6 +219,8 @@ export class DebugPanel {
     f.add(s, 'hardpointY', -0.6, 0.3, 0.01).name('hardpoint y').onChange(geometry);
     f.add(s, 'restLength', 0.1, 0.7, 0.01).name('rest length');
     f.add(s, 'maxTravel', 0.05, 0.6, 0.01).name('max travel');
+    f.add(s, 'bumpStopStiffness', 0, 1500000, 5000).name('bump stop N/m');
+    f.add(s, 'bumpStopDamping', 0, 40000, 100).name('bump stop damping');
     f.add(s, 'stiffnessFront', 10000, 140000, 500).name('stiffness front');
     f.add(s, 'stiffnessRear', 10000, 140000, 500).name('stiffness rear');
     f.add(s, 'dampingFront', 0, 16000, 50).name('damping front');
@@ -263,6 +265,8 @@ export class DebugPanel {
     f.add(d, 'shiftUpRPM', 2000, 11000, 50).name('shift up rpm');
     f.add(d, 'shiftDownRPM', 800, 8000, 50).name('shift down rpm');
     f.add(d, 'shiftCutTime', 0, 0.6, 0.01).name('shift cut s');
+    f.add(d, 'shiftHysteresisRPM', 0, 3000, 50).name('shift hysteresis rpm');
+    f.add(d, 'shiftHoldTime', 0, 3, 0.05).name('min seconds between shifts');
     f.add(d, 'drivelineEfficiency', 0.4, 1, 0.01).name('driveline efficiency');
     f.add(d, 'brakeTorqueFront', 200, 12000, 50).name('brake torque front');
     f.add(d, 'brakeTorqueRear', 200, 12000, 50).name('brake torque rear');
@@ -320,12 +324,15 @@ export class DebugPanel {
     f.add(e, 'skidThreshold', 0, 1, 0.01).name('skid threshold');
     f.add(e, 'skidOpacity', 0, 1, 0.01).name('skid opacity');
     f.add(e, 'dustRate', 0, 4, 0.05).name('dust rate');
+    f.add(e, 'minSlipSpeed', 0, 6, 0.1).name('min slip speed m/s');
     f.add(e, 'deformation', 0, 3, 0.05).name('dent depth');
     f.add(e, 'debrisFadeDistance', 0, 20, 0.5).name('near-camera fade');
     f.add(e, 'debrisScatterBias', 0, 2, 0.01).name('scatter bias');
 
     const lights = f.addFolder('Lighting');
     lights.add(e, 'daylight', 0.12, 1.4, 0.01).name('daylight');
+    lights.add(e, 'shadows').name('sun shadows');
+    lights.add(e, 'headlightShadows').name('headlight shadows');
     lights.add(e, 'headlights').name('headlights');
     lights.add(e, 'headlightIntensity', 0, 4, 0.05).name('headlight brightness');
     lights.add(e, 'headlightRange', 8, 120, 1).name('headlight range m');

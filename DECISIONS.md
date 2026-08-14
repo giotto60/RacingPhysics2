@@ -2,6 +2,78 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## Fault pass — lighting, markings, resistance, gearbox, ground contact
+
+- **Rolling resistance is a torque at the wheel, not a force at the contact
+  patch.** As a force it was subtracted from the tyre force and then handed
+  straight back to the wheel's own equation of motion, so the wheel simply spun
+  a fraction faster until the tyre cancelled it exactly and the chassis felt
+  nothing: measured coast-down was 0.035 m/s^2 at a coefficient of zero and
+  0.050 m/s^2 at the slider's maximum. As a torque it has to reach the car
+  through the contact patch like everything else, and the same three settings
+  now give 0.0, 1.07 and 5.32 m/s^2.
+- **That torque goes through the same denominator as the drive torque.** The
+  wheel integrator is semi-implicit, so a torque applied outside its denominator
+  is not damped by the tyre force opposing it. Left outside, rolling resistance
+  came out several times its coefficient at walking pace -- enough that the car
+  could not pull away at all -- and near its nominal value at speed.
+- **Suspension force follows the contact normal, not the chassis up axis.**
+  Tied to the chassis it gains a horizontal component the instant the car
+  pitches, and at a standstill there is nothing to oppose it: the car settles
+  nose-up on its springs and creeps backwards at 0.3 m/s for ever. This is also
+  what Bullet's raycast vehicle does, for the same reason.
+- **The shift schedule runs off road speed, not engine speed.** Engine speed
+  follows the driven wheels, so wheelspin asked for a gear the car was not
+  travelling fast enough to hold, the upshift killed the wheelspin, and the box
+  asked for the old gear back several times a second. A standing start used to
+  read `1 2 1 2 1 2 1 2 1 2 3` between 38 and 44 km/h; on a slippery surface it
+  reached sixth gear at 4 km/h.
+- **The shift guard bands are derived from the ratios rather than fixed.** A
+  shift is allowed only if the gear it lands in would not immediately ask to
+  shift back, which is a property of the ratio set, so any gearing stays stable
+  without retuning. The limiter and the idle floor override the guard, because
+  sitting on either is worse than one shift the guard would rather not have
+  made, and a minimum dwell keeps that from becoming a new oscillation.
+- **The road is a solid slab, not a ribbon of triangles.** A surface with no
+  thickness is something a car can be pushed through, most obviously at the
+  jump's lip, which is a vertical wall one triangle thick. The underside is
+  buried below the grass, so on the flat none of it shows; where the road stands
+  proud, at the crest and the jump, the sides are exactly the visible depth the
+  raised road always should have had.
+- **The second pass through a self-crossing is lifted 3.5 cm.** Two coplanar
+  strips of road have no stable answer to which is in front, which is what made
+  the lane markings flicker in and out at the crossing. Crossings are found by
+  looking for samples far apart around the lap but close together in the world,
+  so the lift follows the layout rather than a hard-coded coordinate, and it is
+  ramped in over the whole approach so there is no step to drive over.
+- **The suspension has a bump stop, and a positional guard behind it.** Past
+  full travel the spring saturated and the chassis kept descending until the
+  hull collider was inside the road; the wheels were drawn 27 cm under the
+  surface on a 9 m drop and the hull reached the road itself. The bump stop
+  carries an ordinary heavy landing, and beyond a 6 cm allowance the body is
+  lifted clear and the velocity driving it into the ground is removed.
+- **A ray only counts as ground if the surface faces up.** Otherwise a ray that
+  catches a wall reports a grounded wheel and the suspension pushes the car
+  sideways off it.
+- **Dust and skid marks need real sliding speed, not just grip utilisation.**
+  Utilisation is normalised, so it reads high at a crawl: a car creeping at
+  0.3 m/s was throwing gravel. Sliding speed at the contact patch is the honest
+  quantity and both channels now gate on it.
+- **The visual roll exaggeration fades out away from upright.** Multiplying a
+  roll angle works while the car is on its wheels, but an inverted car
+  decomposes to roughly 180 degrees, and 180 x 1.75 is a completely different
+  orientation -- the drawn car sat 135 degrees away from the physics body, one
+  corner through the floor and the rest hanging over it. Upright behaviour is
+  unchanged.
+- **Shadow maps are always enabled and the switch moves `castShadow` on the
+  lights.** Toggling `shadowMap.enabled` at runtime forces every material in the
+  scene to recompile; toggling a light does not. The sun's shadow frustum tracks
+  the camera target and is sized from the visible width, so a 2k map covers the
+  screen instead of being spread over a kilometre of track nobody is looking at.
+- **Headlights cast shadows too.** A beam that shines through a parked car reads
+  as painted-on light rather than as a headlight. It costs two more shadow
+  passes, and there is a switch for anyone who would rather have the frames.
+
 ## Driving pass — controls, framing, circuit and lighting
 
 - **Reverse is the pedal-swap convention**, not a modifier key: hold the brake

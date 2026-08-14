@@ -26,6 +26,22 @@ const TRACK_BASE_Y = 0;
 /** How far the grass collider is sunk below its mesh. Sub-pixel from above. */
 const GRASS_COLLIDER_DROP = 0.05;
 const GRASS_MESH_DROP = 0.02;
+/**
+ * The road is a solid slab rather than a sheet of triangles. A ribbon with no
+ * thickness is something a car can be pushed through -- most obviously into the
+ * back of the jump, which is a vertical wall one triangle thick. The underside
+ * is buried below the grass, so on the flat none of it is visible.
+ */
+const ROAD_SLAB_DEPTH = 0.35;
+const ROAD_SLAB_FLOOR = -0.5;
+/** Vertical clearance given to the second pass through a self-crossing. */
+const CROSSING_LIFT = 0.035;
+/**
+ * Connecting lanes are laid a whisker below the racing surface. Exactly flush
+ * they would be coplanar with the ribbon where the two meet, and coplanar
+ * surfaces fight over every pixel they share.
+ */
+const LANE_SINK = 0.015;
 
 /** Teleport targets offered in the debug panel. */
 export const SKIDPAD_CENTRE = new THREE.Vector3(60, 0, 235);
@@ -179,6 +195,8 @@ function addTrimesh(
   material: THREE.Material,
 ): void {
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
   scene.add(mesh);
   build.meshes.push(mesh);
 
@@ -211,6 +229,8 @@ function addPad(
   );
   mesh.position.copy(position);
   mesh.rotation.y = yaw;
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
   scene.add(mesh);
   build.meshes.push(mesh);
 
@@ -281,6 +301,8 @@ function addRamp(
   const yaw = Math.atan2(-dirZ, dirX);
   mesh.position.copy(centre);
   mesh.rotation.y = yaw;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   scene.add(mesh);
   build.meshes.push(mesh);
 
@@ -291,6 +313,7 @@ function addRamp(
   );
   chevron.position.set(0, height / 2 + 0.04, 0);
   chevron.rotation.z = Math.atan2(height, length);
+  chevron.receiveShadow = true;
   mesh.add(chevron);
 
   const body = physics.world.createRigidBody(
@@ -308,6 +331,62 @@ function addRamp(
   build.colliders.push(collider);
 }
 
+/**
+ * A figure-8 crosses itself, and where it does, two strips of road sit in
+ * exactly the same plane. Coplanar surfaces have no stable answer to which one
+ * is in front, so the lane markings flicker in and out across the crossing as
+ * the camera moves. Find each self-overlap -- samples that are far apart around
+ * the lap but close together in the world -- and lift the second pass through
+ * it, ramped in over the whole approach so there is nothing to drive over.
+ */
+function liftCrossings(centre: THREE.Vector3[]): void {
+  const n = centre.length;
+  /** Samples this far apart around the lap are different parts of the circuit. */
+  const separation = Math.floor(n / 8);
+  const radius = TRACK_WIDTH * 1.1;
+  const overlapping = new Array<boolean>(n).fill(false);
+
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + separation; j < n; j += 1) {
+      // Circular distance, so the samples either side of the lap's seam are
+      // not mistaken for a crossing with themselves.
+      if (Math.min(j - i, n - (j - i)) < separation) continue;
+      const dx = centre[i].x - centre[j].x;
+      const dz = centre[i].z - centre[j].z;
+      if (dx * dx + dz * dz < radius * radius) {
+        overlapping[i] = true;
+        overlapping[j] = true;
+      }
+    }
+  }
+
+  // Walk from a sample that is clear of any crossing, so a run is never split
+  // in two by the start of the lap.
+  const start = overlapping.indexOf(false);
+  if (start < 0) return;
+
+  let pass = 0;
+  let k = 0;
+  while (k < n) {
+    if (!overlapping[(start + k) % n]) {
+      k += 1;
+      continue;
+    }
+    let length = 0;
+    while (length < n && overlapping[(start + k + length) % n]) length += 1;
+    // Alternate passes: the first through a crossing stays at grade, the
+    // second rides over it.
+    if (pass % 2 === 1) {
+      for (let m = 0; m < length; m += 1) {
+        const s = (m + 0.5) / length;
+        centre[(start + k + m) % n].y += CROSSING_LIFT * 0.5 * (1 - Math.cos(2 * Math.PI * s));
+      }
+    }
+    pass += 1;
+    k += length;
+  }
+}
+
 /** Ribbon of road generated along a closed spline, with elevation. */
 function buildRibbon(
   physics: PhysicsWorld,
@@ -317,34 +396,63 @@ function buildRibbon(
 ): THREE.Vector3[] {
   const points = CENTRELINE.map(([x, z]) => new THREE.Vector3(x, 0, z));
   const curve = new THREE.CatmullRomCurve3(points, true, 'centripetal', 0.5);
-
-  const centre: THREE.Vector3[] = [];
-  const vertices = new Float32Array(samples * 2 * 3);
-  const uvs = new Float32Array(samples * 2 * 2);
-  const indices = new Uint32Array(samples * 6);
   const half = TRACK_WIDTH * 0.5;
-  const tangent = new THREE.Vector3();
-  const normal = new THREE.Vector3();
-  let travelled = 0;
 
+  // Sample the centreline first and settle the elevation before any geometry
+  // is built, so the crossing lift moves the road and its collider together.
+  const centre: THREE.Vector3[] = [];
+  const across: THREE.Vector3[] = [];
+  const tangent = new THREE.Vector3();
   for (let i = 0; i < samples; i += 1) {
     const t = i / samples;
     const p = curve.getPointAt(t);
     p.y = elevationAt(p.x, p.z);
-    if (i > 0) travelled += p.distanceTo(centre[i - 1]);
-    centre.push(p.clone());
+    centre.push(p);
     curve.getTangentAt(t, tangent);
     tangent.y = 0;
     tangent.normalize();
-    normal.set(-tangent.z, 0, tangent.x);
+    across.push(new THREE.Vector3(-tangent.z, 0, tangent.x));
+  }
+  liftCrossings(centre);
 
-    const base = i * 6;
-    vertices[base + 0] = p.x - normal.x * half;
-    vertices[base + 1] = p.y;
-    vertices[base + 2] = p.z - normal.z * half;
-    vertices[base + 3] = p.x + normal.x * half;
-    vertices[base + 4] = p.y;
-    vertices[base + 5] = p.z + normal.z * half;
+  // Four vertices per sample: the two road edges and the two buried corners
+  // directly below them. The driving surface is drawn from the top pair, and
+  // the collider is the whole closed slab.
+  const solid = new Float32Array(samples * 4 * 3);
+  const surface = new Float32Array(samples * 2 * 3);
+  const uvs = new Float32Array(samples * 2 * 2);
+  const surfaceIndices = new Uint32Array(samples * 6);
+  const skirtIndices = new Uint32Array(samples * 12);
+  const solidIndices = new Uint32Array(samples * 24);
+  let travelled = 0;
+
+  for (let i = 0; i < samples; i += 1) {
+    const p = centre[i];
+    const n = across[i];
+    if (i > 0) travelled += p.distanceTo(centre[i - 1]);
+    const floor = Math.min(p.y - ROAD_SLAB_DEPTH, ROAD_SLAB_FLOOR);
+
+    const v = i * 12;
+    solid[v + 0] = p.x - n.x * half;
+    solid[v + 1] = p.y;
+    solid[v + 2] = p.z - n.z * half;
+    solid[v + 3] = p.x + n.x * half;
+    solid[v + 4] = p.y;
+    solid[v + 5] = p.z + n.z * half;
+    solid[v + 6] = p.x - n.x * half;
+    solid[v + 7] = floor;
+    solid[v + 8] = p.z - n.z * half;
+    solid[v + 9] = p.x + n.x * half;
+    solid[v + 10] = floor;
+    solid[v + 11] = p.z + n.z * half;
+
+    const s = i * 6;
+    surface[s + 0] = solid[v + 0];
+    surface[s + 1] = solid[v + 1];
+    surface[s + 2] = solid[v + 2];
+    surface[s + 3] = solid[v + 3];
+    surface[s + 4] = solid[v + 4];
+    surface[s + 5] = solid[v + 5];
 
     // u spans the width so the baked edge lines land on the edges; v is real
     // distance, so the centre-line dashes keep a constant length.
@@ -355,33 +463,51 @@ function buildRibbon(
     uvs[uvBase + 3] = travelled / 14;
 
     const next = (i + 1) % samples;
-    const idx = i * 6;
-    const a = i * 2;
-    const b = i * 2 + 1;
-    const c = next * 2;
-    const d = next * 2 + 1;
+    // Left and right edge, top and bottom, for this cross-section and the next.
+    const tl = i * 4;
+    const tr = i * 4 + 1;
+    const bl = i * 4 + 2;
+    const br = i * 4 + 3;
+    const ntl = next * 4;
+    const ntr = next * 4 + 1;
+    const nbl = next * 4 + 2;
+    const nbr = next * 4 + 3;
+
     // Wound so the surface faces up; a downward-facing ribbon is invisible
     // from an overhead camera even though the collider still works.
-    indices[idx + 0] = a;
-    indices[idx + 1] = b;
-    indices[idx + 2] = c;
-    indices[idx + 3] = b;
-    indices[idx + 4] = d;
-    indices[idx + 5] = c;
+    const si = i * 6;
+    surfaceIndices[si + 0] = i * 2;
+    surfaceIndices[si + 1] = i * 2 + 1;
+    surfaceIndices[si + 2] = next * 2;
+    surfaceIndices[si + 3] = i * 2 + 1;
+    surfaceIndices[si + 4] = next * 2 + 1;
+    surfaceIndices[si + 5] = next * 2;
+
+    const ki = i * 12;
+    const walls = [tl, ntl, bl, bl, ntl, nbl, tr, br, ntr, br, nbr, ntr];
+    for (let m = 0; m < 12; m += 1) skirtIndices[ki + m] = walls[m];
+
+    const ci = i * 24;
+    const cell = [
+      tl, tr, ntl, tr, ntr, ntl, // top
+      bl, nbl, br, br, nbl, nbr, // bottom
+      ...walls, // both sides
+    ];
+    for (let m = 0; m < 24; m += 1) solidIndices[ci + m] = cell[m];
   }
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(vertices.slice(), 3));
+  geometry.setAttribute('position', new THREE.BufferAttribute(surface, 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex(new THREE.BufferAttribute(indices.slice(), 1));
+  geometry.setIndex(new THREE.BufferAttribute(surfaceIndices.slice(), 1));
   geometry.computeVertexNormals();
 
   addTrimesh(
     physics,
     scene,
     geometry,
-    vertices,
-    indices,
+    solid,
+    solidIndices,
     'tarmac',
     build,
     new THREE.MeshPhongMaterial({
@@ -391,6 +517,28 @@ function buildRibbon(
       specular: 0x0e1114,
     }),
   );
+
+  // The sides of the slab. Buried on the flat, and the visible face of the
+  // crest, the jump lip and the crossing where the road stands proud.
+  const skirtGeometry = new THREE.BufferGeometry();
+  skirtGeometry.setAttribute('position', new THREE.BufferAttribute(solid.slice(), 3));
+  skirtGeometry.setIndex(new THREE.BufferAttribute(skirtIndices, 1));
+  skirtGeometry.computeVertexNormals();
+  const skirt = new THREE.Mesh(
+    skirtGeometry,
+    new THREE.MeshPhongMaterial({
+      color: 0x2b2f34,
+      side: THREE.DoubleSide,
+      flatShading: true,
+      shininess: 4,
+      specular: 0x0b0d10,
+    }),
+  );
+  skirt.castShadow = true;
+  skirt.receiveShadow = true;
+  scene.add(skirt);
+  build.meshes.push(skirt);
+
   return centre;
 }
 
@@ -462,6 +610,8 @@ function addStartLine(scene: THREE.Scene, build: TrackBuild, centreline: THREE.V
         0,
         -0.3 + row * 0.6,
       );
+      // Paint, not kerbing: it must not throw a shadow of its own thickness.
+      cell.receiveShadow = true;
       group.add(cell);
     }
   }
@@ -491,6 +641,7 @@ export function buildTrack(physics: PhysicsWorld, scene: THREE.Scene): TrackBuil
     surfaceMaterial('grass', GROUND_HALF / 5, GROUND_HALF / 5),
   );
   groundMesh.position.y = -1 - GRASS_MESH_DROP;
+  groundMesh.receiveShadow = true;
   scene.add(groundMesh);
   build.meshes.push(groundMesh);
 
@@ -502,13 +653,14 @@ export function buildTrack(physics: PhysicsWorld, scene: THREE.Scene): TrackBuil
   const skidPadCentre = SKIDPAD_CENTRE.clone();
   skidPadCentre.y = TRACK_BASE_Y;
   buildDisc(physics, scene, build, skidPadCentre, SKIDPAD_RADIUS, 96, 'tarmac');
-  // Access lane from the top of the right lobe.
+  // Access lane from the top of the right lobe. It runs into the racing
+  // surface, so it is laid just below it rather than flush with it.
   addPad(
     physics,
     scene,
     new THREE.Vector3(14, 0.3, 150),
     new THREE.Vector3(96, 0, 130),
-    TRACK_BASE_Y,
+    TRACK_BASE_Y - LANE_SINK,
     0,
     'tarmac',
     build,
@@ -535,7 +687,7 @@ export function buildTrack(physics: PhysicsWorld, scene: THREE.Scene): TrackBuil
     scene,
     new THREE.Vector3(112, 0.3, 14),
     new THREE.Vector3(198, 0, -96),
-    TRACK_BASE_Y,
+    TRACK_BASE_Y - LANE_SINK,
     0,
     'tarmac',
     build,
