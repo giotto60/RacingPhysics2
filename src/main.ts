@@ -6,15 +6,17 @@ import { defaultParams } from './core/params';
 import { Input } from './core/input';
 import { Car } from './vehicle/car';
 import { CarView } from './vehicle/carView';
-import { CAR_MODELS } from './vehicle/models';
+import { CAR_MODELS, loadCarModel, modelById } from './vehicle/models';
+import { applyVehicleSetup } from './vehicle/setup';
+import { createDriverState, driveAlong } from './vehicle/driver';
 import {
   buildTrack,
+  pointOnTrack,
   spawnOnCentreline,
   SKIDPAD_CENTRE,
   SURFACE_STRIP_START,
 } from './world/track';
 import { PropWorld } from './world/props';
-import { placeProps } from './world/layout';
 import { CollisionResponse } from './physics/collision';
 import { ChaseCamera } from './expression/camera';
 import { SkidMarks } from './expression/skidmarks';
@@ -47,10 +49,85 @@ async function boot(): Promise<void> {
   const carView = new CarView(view.scene, car, params);
   // Whatever body is drawn, the collider is that body's box.
   carView.onHullChanged = () => car.applyHullShape();
-  void carView.setModel(params.expression.carModel);
 
+  /**
+   * The opponents.
+   *
+   * Each one is an ordinary `Car` with an ordinary `CarView`, driven by inputs
+   * of exactly the same shape the keyboard produces -- there is no cheating
+   * anywhere in the driver, and no separate physics path. They share the
+   * player's parameters, so picking a car changes all three, which is why they
+   * only differ in the hue of their paint and where they start.
+   */
+  // Both lines sit left of centre, because the ramps are lined up down the
+  // right-hand side of the road: a jump is there to be aimed at, not to be
+  // taken by surprise by a car that was only trying to drive round.
+  const OPPONENTS = [
+    { hue: 150, grid: 8, line: -3.0 },
+    { hue: 232, grid: 16, line: -0.8 },
+  ];
+  const opponents = OPPONENTS.map((spec) => {
+    const start = spawnOnCentreline(track.centreline, track.centreline.length - spec.grid * 3);
+    const opponent = new Car(physics, params, start.position, start.heading);
+    const opponentView = new CarView(view.scene, opponent, params);
+    opponentView.hueShift = spec.hue;
+    opponentView.onHullChanged = () => opponent.applyHullShape();
+    return {
+      car: opponent,
+      view: opponentView,
+      driver: createDriverState(spec.line),
+      gridIndex: track.centreline.length - spec.grid * 3,
+      lane: spec.line,
+    };
+  });
+
+  type Opponent = (typeof opponents)[number];
+
+  /** Set a computer driver back on the road where it went off it. */
+  const rescue = (opponent: Opponent): void => {
+    const spot = pointOnTrack(
+      track.centreline,
+      opponent.driver.index / track.centreline.length,
+      opponent.driver.line,
+    );
+    opponent.car.respawn(
+      spot.position.clone().setY(spot.position.y + 1.0),
+      spot.heading,
+    );
+    opponent.driver.stuckFor = 0;
+    opponent.driver.needsRescue = false;
+    opponent.view.capture();
+    opponent.view.capture();
+  };
+
+  let panelRef: DebugPanel | null = null;
+
+  /**
+   * Picking a car is a vehicle change, not a paint job: the class table and the
+   * model's own geometry are written into the parameters first, and everything
+   * that reads them -- the collider, the mass properties, the hardpoints, the
+   * drawn body -- is rebuilt from that.
+   */
+  const selectCarModel = async (id: string): Promise<void> => {
+    const def = modelById(id);
+    const loaded = def.file ? await loadCarModel(def, import.meta.env.BASE_URL).catch(() => null) : null;
+    applyVehicleSetup(params, def, loaded);
+    const useId = loaded || !def.file ? id : 'blocks';
+    for (const entry of [{ car, view: carView }, ...opponents]) {
+      entry.car.applyMassProperties();
+      entry.car.refreshGeometry();
+      entry.car.applyHullShape();
+      await entry.view.setModel(useId);
+    }
+    // The setup rewrote most of the panel's numbers, so it has to be told.
+    panelRef?.refresh();
+  };
+  void selectCarModel(params.expression.carModel);
+
+  // The prop world stays -- the mass ladder, the freeze-on-budget debris and
+  // the collision harness are all built on it, and props can still be spawned
+  // from the console -- but nothing is placed on the circuit any more.
   const props = new PropWorld(physics, view.scene, params);
-  placeProps(props, view.scene, track.centreline);
 
   const collisions = new CollisionResponse(physics, car, props, params);
   const camera = new ChaseCamera(view, params);
@@ -117,12 +194,23 @@ async function boot(): Promise<void> {
     };
 
     car.step(dt, carInput);
+    for (const opponent of opponents) {
+      opponent.car.step(
+        dt,
+        driveAlong(opponent.car, track.centreline, opponent.driver, params, dt),
+      );
+      if (opponent.driver.needsRescue) rescue(opponent);
+    }
     collisions.beforeStep();
     physics.step();
     collisions.afterStep(dt);
     props.enforceBudget();
 
     carView.capture();
+    for (const opponent of opponents) {
+      opponent.view.capture();
+      skidMarks.update(opponent.car.wheels);
+    }
     props.capture();
     skidMarks.update(car.wheels);
     particles.updateWheels(car.wheels, dt);
@@ -135,6 +223,7 @@ async function boot(): Promise<void> {
 
   const render = (alpha: number, frameDelta: number): void => {
     carView.update(alpha);
+    for (const opponent of opponents) opponent.view.update(alpha);
     props.render(alpha, view.camera.position);
     view.setDaylight(params.expression.daylight);
     view.setShadows(params.expression.shadows);
@@ -178,10 +267,27 @@ async function boot(): Promise<void> {
 
   // --- controls -----------------------------------------------------------
 
+  /** Put the opponents back on their grid slots behind the start line. */
+  const gridUp = (): void => {
+    for (const opponent of opponents) {
+      const slot = spawnOnCentreline(track.centreline, opponent.gridIndex);
+      const heading = slot.heading;
+      // Offset into their own lane, square to the track.
+      const across = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
+      opponent.car.respawn(slot.position.clone().addScaledVector(across, opponent.lane), heading);
+      opponent.driver.index = opponent.gridIndex;
+      opponent.driver.stuckFor = 0;
+      opponent.driver.laps = 0;
+      opponent.view.capture();
+      opponent.view.capture();
+    }
+  };
+
   const respawn = (): void => {
     car.respawn();
     carView.capture();
     carView.capture();
+    gridUp();
   };
 
   const fullReset = (): void => {
@@ -190,6 +296,7 @@ async function boot(): Promise<void> {
     skidMarks.clear();
     particles.clear();
     carView.resetDeformation();
+    for (const opponent of opponents) opponent.view.resetDeformation();
   };
 
   const teleport = (position: THREE.Vector3, heading: number): void => {
@@ -208,7 +315,7 @@ async function boot(): Promise<void> {
       carView.applyHull();
       car.applyHullShape();
     },
-    onCarModelChanged: () => void carView.setModel(params.expression.carModel),
+    onCarModelChanged: () => void selectCarModel(params.expression.carModel),
     onPropMassChanged: () => props.refreshAllMassProperties(),
     onSolverChanged: () => {
       physics.applySolverConfig();
@@ -216,11 +323,9 @@ async function boot(): Promise<void> {
         params.collision.contactFrequency;
     },
     onPresetApplied: () => {
-      car.applyMassProperties();
-      car.refreshGeometry();
-      // The model comes back with the preset, and it is what decides the hull
-      // box, so the collider follows once it has landed.
-      void carView.setModel(params.expression.carModel).then(() => carView.applyWheels());
+      // The model comes back with the preset, and it is what decides the whole
+      // vehicle, so the setup runs again from it.
+      void selectCarModel(params.expression.carModel);
       props.refreshAllMassProperties();
       physics.applySolverConfig();
     },
@@ -240,14 +345,12 @@ async function boot(): Promise<void> {
       audio.resume();
     },
   });
+  panelRef = panel;
 
-  // Keep the car centred in the part of the window the panel is not covering.
-  const syncViewOffset = (): void => {
-    view.viewOffsetX = panel.gui.domElement.getBoundingClientRect().width / 2;
-    view.updateProjection();
-  };
-  syncViewOffset();
-  window.addEventListener('resize', syncViewOffset);
+  // The car sits in the middle of the window, with the panel overlapping the
+  // view rather than the framing being pushed out of the way of it.
+  view.viewOffsetX = 0;
+  view.updateProjection();
 
   input.onAction = (action) => {
     switch (action) {
@@ -298,7 +401,10 @@ async function boot(): Promise<void> {
   (window as unknown as Record<string, unknown>).rp2 = {
     car,
     carView,
+    opponents,
     carModels: CAR_MODELS,
+    selectCarModel,
+    fullReset,
     params,
     physics,
     loop,

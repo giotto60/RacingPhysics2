@@ -46,82 +46,52 @@ const LANE_SINK = 0.015;
 /** Teleport targets offered in the debug panel. */
 export const SKIDPAD_CENTRE = new THREE.Vector3(60, 0, 235);
 export const SKIDPAD_RADIUS = 46;
-export const SURFACE_STRIP_START = new THREE.Vector3(250, 0, -78);
+export const SURFACE_STRIP_START = new THREE.Vector3(230, 0, 0);
 const STRIP_SECTION_LENGTH = 44;
 
 /**
- * Figure-8 centreline control points. The two neck segments both pass through
- * the origin from opposite diagonals, which is what makes the crossing real
- * rather than two lobes joined at a pinch.
+ * The circuit is a true figure-8: a lemniscate of Bernoulli, sampled directly
+ * rather than splined through hand-placed control points.
+ *
+ * Two properties come free from the curve and are the reason for using it.
+ * Its curvature varies smoothly all the way round, so the two lobes are honest
+ * constant-radius sweepers joined by straighter necks rather than a string of
+ * unrelated corners; and its branches cross at right angles through the origin,
+ * which is what makes the crossing a crossing.
  */
-const CENTRELINE: Array<[number, number]> = [
-  // right lobe: long constant-radius sweeper into the long straight
-  [28, 22],
-  [62, 46],
-  [100, 58],
-  [134, 46],
-  [146, 10],
-  [150, -34],
-  [140, -70],
-  [104, -88],
-  [66, -78],
-  [44, -52],
-  // neck heading north-west across the crossing
-  [16, -14],
-  [-14, 22],
-  // left lobe: hairpin at the far end, chicane on the way back
-  [-42, 48],
-  [-78, 62],
-  [-112, 44],
-  [-128, 12],
-  [-134, -14],
-  [-116, -34],
-  [-88, -40],
-  [-70, -56],
-  [-52, -40],
-  [-34, -56],
-  // neck heading north-east back across the crossing
-  [-16, -30],
-  [10, 2],
-];
+const LEMNISCATE_SCALE = 165;
+
+/** Centreline point at lap fraction `t`, before elevation. */
+function figureOfEight(t: number): { x: number; z: number } {
+  const a = t * Math.PI * 2;
+  const s = Math.sin(a);
+  const d = 1 + s * s;
+  return {
+    x: (LEMNISCATE_SCALE * Math.cos(a)) / d,
+    z: (LEMNISCATE_SCALE * s * Math.cos(a)) / d,
+  };
+}
 
 /**
- * Elevation is authored in world space rather than by lap fraction, so the
- * crest and the jump stay attached to the corners they belong to even if the
- * control points move.
+ * A smooth crest over one lobe, authored by lap fraction so it stays put if the
+ * curve is resized.
+ *
+ * Currently flat, and the reason is worth keeping: the road is a solid slab, so
+ * where it is raised its edges are cliffs. A car running wide on a raised
+ * section drops off the side and catches the slab wall on the way past, which
+ * throws it back into the air -- and that is exactly where a car that has run
+ * wide least needs a surprise. Elevation needs shoulders that rise with the
+ * road before it earns its place here; the ramps carry the jumping in the
+ * meantime, and they can be seen coming.
  */
-const CREST = { x: 66, z: -78, radius: 28, height: 1.7 };
-const JUMP = {
-  x: -88,
-  z: -40,
-  dirX: 0.9,
-  dirZ: -0.44,
-  ramp: 12,
-  height: 1.7,
-  extent: 24,
-};
+const CREST = { at: 0.12, span: 0.11, height: 0 };
 
-function elevationAt(x: number, z: number): number {
-  let h = TRACK_BASE_Y;
-
-  const dc = Math.hypot(x - CREST.x, z - CREST.z);
-  if (dc < CREST.radius) {
-    const c = Math.cos(((Math.PI / 2) * dc) / CREST.radius);
-    h += CREST.height * c * c;
-  }
-
-  const dx = x - JUMP.x;
-  const dz = z - JUMP.z;
-  if (Math.hypot(dx, dz) < JUMP.extent) {
-    // Ramp up along the direction of travel, then a hard lip: the abrupt end
-    // is the point, since a smooth crest launches nothing.
-    const along = dx * JUMP.dirX + dz * JUMP.dirZ;
-    if (along <= 0 && along >= -JUMP.ramp) {
-      h += JUMP.height * (1 + along / JUMP.ramp);
-    }
-  }
-
-  return h;
+function elevationAtLap(t: number): number {
+  // Circular distance to the crest's centre, in lap fractions.
+  const d = Math.abs(((t - CREST.at + 0.5 + 1) % 1) - 0.5);
+  if (d >= CREST.span) return TRACK_BASE_Y;
+  const c = Math.cos(((Math.PI / 2) * d) / CREST.span);
+  return TRACK_BASE_Y + CREST.height * c * c;
 }
 
 export interface TrackBuild {
@@ -250,9 +220,34 @@ function addPad(
 }
 
 /**
- * A launch ramp: a wedge whose leading edge is flush with the road, so a car
- * drives on to it instead of hitting a step. Built as a convex hull, which
- * gives the car hull something solid to ride rather than a paper-thin shell.
+ * The fraction of a ramp spent easing in. Over that stretch the slope rises
+ * from nothing to the launch angle; the rest is dead straight.
+ */
+const RAMP_EASE = 0.55;
+/** Segments the profile is sampled at. */
+const RAMP_SEGMENTS = 14;
+
+/**
+ * Height profile of a ramp, as a fraction of its height at a fraction of its
+ * length. It is the whole answer to a car cartwheeling off a jump.
+ *
+ * A plain wedge has a corner at the bottom: hitting it at speed drives the
+ * suspension through its travel and the springs throw the car off the end with
+ * far more height than the shape has any right to give it. Rounding the whole
+ * profile fixes that, but a curve is a rotation rate -- a car following it is
+ * being pitched nose-up all the way along, and it keeps that rotation when the
+ * road stops. So the ramp eases in and then runs straight: no corner to hit at
+ * the bottom, and the pitch rate is back to zero before the lip.
+ */
+function rampProfile(u: number): number {
+  const a = RAMP_EASE;
+  const slope = 1 / (1 - a / 2);
+  return u <= a ? (slope * u * u) / (2 * a) : (slope * a) / 2 + slope * (u - a);
+}
+
+/**
+ * A launch ramp. Built as a solid with the profile above, so a car drives on to
+ * it rather than hitting a step, and leaves it pointing where it is going.
  */
 function addRamp(
   physics: PhysicsWorld,
@@ -268,25 +263,57 @@ function addRamp(
 ): void {
   const hl = length / 2;
   const hw = width / 2;
-  // Local +X climbs; the vertical face is at the far end.
-  const points = new Float32Array([
-    -hl, 0, -hw,
-    -hl, 0, hw,
-    hl, 0, -hw,
-    hl, 0, hw,
-    hl, height, -hw,
-    hl, height, hw,
-  ]);
+
+  // Local +X climbs; the vertical face is at the far end. Two vertices per
+  // station along the top, plus the two base rails.
+  const n = RAMP_SEGMENTS + 1;
+  const points = new Float32Array((n * 2 + 2) * 3);
+  for (let i = 0; i < n; i += 1) {
+    const u = i / (n - 1);
+    const x = -hl + u * length;
+    const y = height * rampProfile(u);
+    points[i * 6 + 0] = x;
+    points[i * 6 + 1] = y;
+    points[i * 6 + 2] = -hw;
+    points[i * 6 + 3] = x;
+    points[i * 6 + 4] = y;
+    points[i * 6 + 5] = hw;
+  }
+  // The two corners under the lip that close the solid.
+  const base = n * 2;
+  points[base * 3 + 0] = hl;
+  points[base * 3 + 1] = 0;
+  points[base * 3 + 2] = -hw;
+  points[base * 3 + 3] = hl;
+  points[base * 3 + 4] = 0;
+  points[base * 3 + 5] = hw;
+
+  const indices: number[] = [];
+  for (let i = 0; i < n - 1; i += 1) {
+    const a = i * 2;
+    const b = i * 2 + 1;
+    const c = (i + 1) * 2;
+    const d = (i + 1) * 2 + 1;
+    indices.push(a, b, c, b, d, c); // driving surface
+    // Each flank is the region between the profile and the flat ground it sits
+    // on, fanned from the leading edge where the two meet.
+    if (i > 0) {
+      indices.push(0, c, a);
+      indices.push(1, b, d);
+    }
+  }
+  const lipLeft = (n - 1) * 2;
+  const lipRight = lipLeft + 1;
+  // The wedge each flank still needs between the lip, the corner under it and
+  // the leading edge, then the back wall and the floor.
+  indices.push(0, base, lipLeft);
+  indices.push(1, lipRight, base + 1);
+  indices.push(lipLeft, base, lipRight, lipRight, base, base + 1);
+  indices.push(0, 1, base, 1, base + 1, base);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(points.slice(), 3));
-  geometry.setIndex([
-    0, 2, 1, 1, 2, 3, // base
-    0, 1, 5, 0, 5, 4, // ramp face
-    2, 4, 5, 2, 5, 3, // back wall
-    0, 4, 2, // left side
-    1, 3, 5, // right side
-  ]);
+  geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
   const mesh = new THREE.Mesh(
@@ -296,6 +323,7 @@ function addRamp(
       map: surfaceTexture('tarmac', 2, 2),
       shininess: 8,
       specular: 0x0e1114,
+      side: THREE.DoubleSide,
     }),
   );
   const yaw = Math.atan2(-dirZ, dirX);
@@ -306,13 +334,21 @@ function addRamp(
   scene.add(mesh);
   build.meshes.push(mesh);
 
-  // A painted chevron on the face, so the ramp is obvious from above.
+  // A painted chevron down the straight part, so the ramp is obvious from
+  // above and points at where it is going to send you.
+  const tail = 1 - RAMP_EASE;
+  const lipSlope = (height / length) / (1 - RAMP_EASE / 2);
+  const chevronAt = 1 - tail / 2;
   const chevron = new THREE.Mesh(
-    new THREE.BoxGeometry(length * 0.9, 0.02, width * 0.18),
+    new THREE.BoxGeometry(length * tail * 0.92, 0.02, width * 0.18),
     new THREE.MeshPhongMaterial({ color: 0xe6c84a, emissive: 0x3a3208 }),
   );
-  chevron.position.set(0, height / 2 + 0.04, 0);
-  chevron.rotation.z = Math.atan2(height, length);
+  chevron.position.set(
+    -hl + chevronAt * length,
+    height * rampProfile(chevronAt) + 0.04,
+    0,
+  );
+  chevron.rotation.z = Math.atan(lipSlope);
   chevron.receiveShadow = true;
   mesh.add(chevron);
 
@@ -321,10 +357,14 @@ function addRamp(
       .setTranslation(centre.x, centre.y, centre.z)
       .setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }),
   );
-  const hull = RAPIER.ColliderDesc.convexHull(points);
-  if (!hull) return;
+  // A trimesh rather than a convex hull: the eased entry is exactly the part a
+  // hull would fill back in, which would leave the ramp looking rounded and
+  // driving like a wedge.
   const collider = physics.world.createCollider(
-    applyMaterial(hull, 'tarmac').setCollisionGroups(staticGroups),
+    applyMaterial(
+      RAPIER.ColliderDesc.trimesh(points, new Uint32Array(indices)),
+      'tarmac',
+    ).setCollisionGroups(staticGroups),
     body,
   );
   registerSurface(collider.handle, 'tarmac');
@@ -394,24 +434,27 @@ function buildRibbon(
   build: TrackBuild,
   samples: number,
 ): THREE.Vector3[] {
-  const points = CENTRELINE.map(([x, z]) => new THREE.Vector3(x, 0, z));
-  const curve = new THREE.CatmullRomCurve3(points, true, 'centripetal', 0.5);
   const half = TRACK_WIDTH * 0.5;
 
-  // Sample the centreline first and settle the elevation before any geometry
-  // is built, so the crossing lift moves the road and its collider together.
+  // Sample the curve first and settle the elevation before any geometry is
+  // built, so the crossing lift moves the road and its collider together.
   const centre: THREE.Vector3[] = [];
-  const across: THREE.Vector3[] = [];
-  const tangent = new THREE.Vector3();
   for (let i = 0; i < samples; i += 1) {
     const t = i / samples;
-    const p = curve.getPointAt(t);
-    p.y = elevationAt(p.x, p.z);
-    centre.push(p);
-    curve.getTangentAt(t, tangent);
-    tangent.y = 0;
-    tangent.normalize();
-    across.push(new THREE.Vector3(-tangent.z, 0, tangent.x));
+    const p = figureOfEight(t);
+    centre.push(new THREE.Vector3(p.x, elevationAtLap(t), p.z));
+  }
+  // Tangents from the sampled points rather than from an analytic derivative,
+  // so the ribbon's cross-sections are square to the road that is actually
+  // built even where the sampling is coarse.
+  const across: THREE.Vector3[] = [];
+  for (let i = 0; i < samples; i += 1) {
+    const before = centre[(i - 1 + samples) % samples];
+    const after = centre[(i + 1) % samples];
+    const dx = after.x - before.x;
+    const dz = after.z - before.z;
+    const len = Math.max(1e-6, Math.hypot(dx, dz));
+    across.push(new THREE.Vector3(-dz / len, 0, dx / len));
   }
   liftCrossings(centre);
 
@@ -667,45 +710,56 @@ export function buildTrack(physics: PhysicsWorld, scene: THREE.Scene): TrackBuil
   );
 
   // Surface strip: consecutive sections so grip multipliers can be felt back
-  // to back at a constant throttle.
+  // to back at a constant throttle. It runs straight out from the circuit's
+  // right-hand tip, which is the one place a straight line leaves the figure-8
+  // without crossing it.
   const strip: SurfaceType[] = ['tarmac', 'dirt', 'grass', 'gravel', 'kerb'];
   strip.forEach((surface, i) => {
     addPad(
       physics,
       scene,
-      new THREE.Vector3(14, 0.3, STRIP_SECTION_LENGTH),
-      new THREE.Vector3(SURFACE_STRIP_START.x, 0, SURFACE_STRIP_START.z + i * STRIP_SECTION_LENGTH),
+      new THREE.Vector3(STRIP_SECTION_LENGTH, 0.3, 14),
+      new THREE.Vector3(SURFACE_STRIP_START.x + i * STRIP_SECTION_LENGTH, 0, SURFACE_STRIP_START.z),
       surface === 'kerb' ? TRACK_BASE_Y + 0.04 : TRACK_BASE_Y,
       0,
       surface,
       build,
     );
   });
-  // Lane connecting the long straight to the surface strip.
+  // Short lane joining the circuit to the strip.
   addPad(
     physics,
     scene,
-    new THREE.Vector3(112, 0.3, 14),
-    new THREE.Vector3(198, 0, -96),
+    new THREE.Vector3(40, 0.3, 14),
+    new THREE.Vector3(SURFACE_STRIP_START.x - STRIP_SECTION_LENGTH * 0.5 - 14, 0, 0),
     TRACK_BASE_Y - LANE_SINK,
     0,
     'tarmac',
     build,
   );
 
-  // Kerbs on the inside of the hairpin, where a wheel will actually find them.
-  for (let i = 0; i < 10; i += 1) {
-    const a = -Math.PI * 0.42 + (i / 9) * Math.PI * 0.84;
-    addPad(
-      physics,
-      scene,
-      new THREE.Vector3(2.4, 0.24, 3.4),
-      new THREE.Vector3(-122 + Math.cos(a) * -8, 0, -12 + Math.sin(a) * 22),
-      TRACK_BASE_Y + 0.07,
-      -a,
-      'kerb',
-      build,
-    );
+  // Kerbs on the inside of both tips, which are the only two corners tight
+  // enough for a wheel to find them. Inside, and low: a kerb on the outside of
+  // a corner is a trap for anyone who runs wide, and a tall one is a ramp.
+  for (const tip of [0, 0.5]) {
+    for (let i = 0; i < 15; i += 1) {
+      const t = tip + (i - 7) * 0.005;
+      // Positive lateral is the inside of both tips -- verified by probing the
+      // built world, because the sign depends on which way the curve is wound.
+      const spot = pointOnTrack(build.centreline, (t + 1) % 1, TRACK_WIDTH * 0.5 + 0.9);
+      addPad(
+        physics,
+        scene,
+        new THREE.Vector3(2.2, 0.09, 4.4),
+        spot.position,
+        // Three centimetres proud: a rumble strip a car can put two wheels
+        // over, not a step that launches whatever clips it at racing speed.
+        TRACK_BASE_Y + 0.03,
+        spot.heading,
+        'kerb',
+        build,
+      );
+    }
   }
 
   buildRamps(physics, scene, build);
@@ -719,16 +773,27 @@ export function buildTrack(physics: PhysicsWorld, scene: THREE.Scene): TrackBuil
  */
 function buildRamps(physics: PhysicsWorld, scene: THREE.Scene, build: TrackBuild): void {
   const line = build.centreline;
+  // Three of them, on the straighter part of each sweep and clear of both the
+  // crest and the crossing, so a landing never arrives somewhere the player
+  // has to be doing something else.
+  //
+  // All of them sit against the outside edge of the road rather than across it.
+  // A jump is something to go and take, not a trap laid in the racing line for
+  // anyone -- the computer drivers included -- who happened to be driving
+  // normally.
+  // Far enough over that a car has to aim for one. Clipping a ramp with the
+  // wheels down one side only is what rolls a car, so a ramp that overlaps a
+  // driving line is worse than no ramp at all.
+  const OUTSIDE = 4.3;
+  const RAMP_WIDTH = 4.4;
   const ramps: Array<{ t: number; lateral: number; length: number; width: number; height: number }> =
     [
-      // Long straight on the right lobe: the big one, taken at full speed.
-      { t: 0.17, lateral: 0, length: 11, width: 8.5, height: 1.9 },
-      // Exit of the right lobe: a gentler kicker.
-      { t: 0.3, lateral: -2.5, length: 9, width: 7, height: 1.15 },
-      // Back straight on the left lobe.
-      { t: 0.63, lateral: 2, length: 10, width: 7.5, height: 1.5 },
-      // Approaching the crossing: a small one for landing practice.
-      { t: 0.93, lateral: 0, length: 8, width: 7, height: 0.85 },
+      // Upper-left branch: the big one, taken at full speed.
+      { t: 0.35, lateral: OUTSIDE, length: 12, width: RAMP_WIDTH, height: 1.7 },
+      // Lower-left branch: a gentler kicker.
+      { t: 0.65, lateral: OUTSIDE, length: 10, width: RAMP_WIDTH, height: 1.1 },
+      // Lower-right branch: a small one for landing practice.
+      { t: 0.88, lateral: OUTSIDE, length: 9, width: RAMP_WIDTH, height: 0.8 },
     ];
 
   for (const r of ramps) {

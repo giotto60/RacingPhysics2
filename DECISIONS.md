@@ -2,6 +2,80 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## Racing pass — a real circuit, opponents, and a vehicle per model
+
+- **Every vehicle is derived, not tuned.** The class table in `models.ts` says
+  what a vehicle *is* -- how long, how wide, how heavy, driven where, how much
+  power and grip relative to the defaults -- and `setup.ts` derives the rest:
+  inertia from the body box, wheelbase and tyre size from the hubs the artist
+  placed, spring rates, bump stops and brake torque from the mass, steering lock
+  from the length, drag from the frontal area. Adding a vehicle is one row.
+- **Power and grip multipliers never drop below 1.** Every car got the rise that
+  was asked for; a fire engine is slow because it weighs nine tonnes and a
+  tractor because it is a tractor, not because either was handed a weaker
+  engine than the defaults.
+- **Wheels keep the size they were drawn at**, scaled with the body's width
+  rather than its length, and the simulation takes that as its wheel radius. A
+  fixed radius on a body stretched to a class length is what made the wheels
+  look wrong; the mean of the four is used, because the simulation runs one
+  wheel size and a tractor's rear tyres are half again its fronts.
+- **Track width is floored at 85% of the body.** Kenney's kit tucks its hubs
+  0.6 units apart inside a 1.5 unit shell -- a 40% track. At the grip the cars
+  now have, a 40% track does not slide when pushed, it tips over, and that was
+  precisely what was throwing the computer drivers into the air: they were
+  rolling onto two wheels in the fast corners and catching a hull edge.
+- **The computer drivers know their own rollover limit.** Cornering speed is
+  taken from the lower of what the tyres can hold and what the track width and
+  centre-of-mass height allow, so a van is driven like a van and a race car like
+  a race car with nothing authored per vehicle to say so. They also look further
+  ahead the straighter the road is, because a pursuit driver aiming at a distant
+  point cuts the apex off a tight corner -- which is how they kept finding the
+  kerbs.
+- **An opponent is an ordinary `Car` with an ordinary `CarView`,** driven by
+  inputs of the same shape the keyboard produces. There is no second physics
+  path and no cheat: they share the player's parameters, which is why picking a
+  car changes all three of them.
+- **Opponents are recoloured by rotating the hue of the texture**, not by
+  tinting the material. Both kits put their colour in the image -- Kenney's
+  whole catalogue shares one palette -- so a material tint only darkens the
+  paint towards the tint instead of changing it.
+- **The circuit is a lemniscate of Bernoulli**, sampled directly rather than
+  splined through hand-placed points. Its curvature varies smoothly all the way
+  round, so the lobes are honest constant-radius sweepers, and its branches
+  cross at right angles, which is what makes the crossing a crossing.
+- **The ramps ease in and then run straight.** A plain wedge has a corner at the
+  bottom that drives the suspension through its travel and throws the car off
+  the end; rounding the whole profile fixes that but replaces it with a rotation
+  rate, because a car following a curve is being pitched nose-up all the way
+  along and keeps that rotation when the road stops. Easing in and then running
+  straight has neither problem: measured over the big ramp at 30 m/s, the car
+  now leaves at 1.8 degrees and lands at 2.2.
+- **Wheel angular momentum is fed back into the chassis.** Spinning a wheel up
+  takes a torque and that torque has to come from the body it hangs off, which
+  the simulation was simply not telling it. On the ground the tyre force
+  supplies it and the term is near zero, so nothing about driving changes; in
+  the air the whole of it lands on the body, so the throttle pitches the nose up
+  and the brake brings it down exactly as they do on a real car. That is the
+  answer to a car rotating backwards off a jump: not a correction bolted on top
+  of the physics, but a piece of the physics that was missing.
+- **The ramps sit against one edge of the road, not across it.** Clipping a jump
+  with the wheels down one side only is what rolls a car, so a ramp that
+  overlaps a driving line is worse than no ramp at all. They are there to be
+  aimed at.
+- **The circuit is flat, and the crest is left in the code at zero height.** The
+  road is a solid slab, so where it is raised its edges are cliffs: a car
+  running wide on a raised section drops off the side and catches the slab wall
+  on the way past. Elevation needs shoulders that rise with the road before it
+  earns its place; the ramps carry the jumping in the meantime.
+- **Kerbs are three centimetres proud and on the inside of the corners.** On the
+  outside they are a trap for anyone who has already run wide, and any real
+  height turns them into a launch ramp for whatever clips them at speed.
+- **Nothing is placed on the circuit.** The prop world, the mass ladder and the
+  freeze-on-budget debris all remain and can still be driven from the console;
+  the racing surface is simply clear.
+- **The car sits in the middle of the window**, with the panel overlapping the
+  view rather than the framing being pushed sideways out of its way.
+
 ## Car models — a picker for the two supplied kits
 
 - **The model is fitted to the car, never the car to the model.** Mass, centre

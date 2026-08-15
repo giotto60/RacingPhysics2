@@ -269,7 +269,8 @@ export const defaultParams = (): Params => ({
   },
 
   tyre: {
-    peakGrip: 1.45,
+    // Half again the grip the car was first tuned with, to match the torque.
+    peakGrip: 2.18,
     peakSlipAngle: 9,
     peakSlipRatio: 0.14,
     falloffSharpness: 1.1,
@@ -293,12 +294,16 @@ export const defaultParams = (): Params => ({
   drivetrain: {
     layout: 'RWD',
     awdFrontSplit: 0.4,
-    torqueCurve: [150, 215, 265, 300, 320, 330, 305, 250],
+    // Half again the torque the car was first tuned with: it was accurate for a
+    // 1200 kg road car and too polite to be worth driving.
+    torqueCurve: [225, 323, 398, 450, 480, 495, 458, 375],
     idleRPM: 900,
     limiterRPM: 7600,
     finalDrive: 3.9,
     gearRatios: [3.2, 2.1, 1.5, 1.15, 0.95, 0.8],
-    reverseRatio: 3.4,
+    // Geared low enough to pull hard and to cap the car at a sane speed
+    // backwards: the ratio, not a throttle scale, is what a real gearbox uses.
+    reverseRatio: 4.6,
     shiftUpRPM: 7000,
     shiftDownRPM: 3000,
     shiftCutTime: 0.09,
@@ -307,7 +312,9 @@ export const defaultParams = (): Params => ({
     drivelineEfficiency: 0.9,
     brakeTorqueFront: 3600,
     brakeTorqueRear: 2400,
-    reverseTorqueScale: 0.45,
+    // Reverse used to be geared and throttled so far down that rolling
+    // resistance ate most of it: 3.1 m/s after six seconds of trying.
+    reverseTorqueScale: 0.8,
     lsdOpen: false,
     lsdPreload: 90,
     lsdPowerLock: 0.45,

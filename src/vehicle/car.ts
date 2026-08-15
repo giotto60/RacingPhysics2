@@ -64,6 +64,8 @@ export interface WheelState {
   demandLat: number;
   gripState: number;
   omega: number;
+  /** Torque this wheel's angular acceleration puts back into the chassis, Nm. */
+  reactionTorque: number;
   steerAngle: number;
 
   /** World-space bookkeeping, kept for debug draw and the expression layer. */
@@ -98,6 +100,7 @@ const createWheelState = (hardpoint: THREE.Vector3, isFront: boolean, side: numb
   demandLat: 0,
   gripState: 1,
   omega: 0,
+  reactionTorque: 0,
   steerAngle: 0,
   contactPoint: new THREE.Vector3(),
   contactNormal: new THREE.Vector3(0, 1, 0),
@@ -283,6 +286,7 @@ export class Car {
       w.overTravel = 0;
       w.overTravelVelocity = 0;
       w.slipSpeed = 0;
+      w.reactionTorque = 0;
     }
     this.drivetrain.gear = 1;
     this.drivetrain.rpm = this.params.drivetrain.idleRPM;
@@ -579,6 +583,7 @@ export class Car {
         wheel.gripState = updateGripState(p, wheel.gripState, 0, dt);
         this.integrateWheel(wheel, driveTorque, brakeTorque, 0, 0, dt, driven[i]);
         wheel.spin += wheel.omega * dt;
+        this.applyWheelReaction(wheel);
         return;
       }
 
@@ -646,7 +651,15 @@ export class Car {
 
       this.integrateWheel(wheel, driveTorque, brakeTorque, fx, stiffness / slipReference, dt, driven[i]);
       wheel.spin += wheel.omega * dt;
+      this.applyWheelReaction(wheel);
     });
+  }
+
+  /** Feed a wheel's angular acceleration back into the body it hangs off. */
+  private applyWheelReaction(wheel: WheelState): void {
+    if (wheel.reactionTorque === 0) return;
+    const t = scratchB.copy(wheel.right).multiplyScalar(wheel.reactionTorque);
+    this.body.addTorque({ x: t.x, y: t.y, z: t.z }, true);
   }
 
   /**
@@ -707,7 +720,24 @@ export class Car {
       if (Math.abs(omega) <= brakeDelta) omega = 0;
       else omega -= Math.sign(omega) * brakeDelta;
     }
+
+    const before = wheel.omega;
     wheel.omega = clamp(omega, -400, 400);
+
+    /*
+     * Newton's third law, which the chassis was not being told about.
+     *
+     * Spinning a wheel up or slowing one down takes a torque, and that torque
+     * has to come from somewhere: the chassis. On the ground the tyre force
+     * supplies it and this term is near zero, which is why it changes nothing
+     * about the way the car drives. In the air there is no tyre force, so the
+     * whole of it lands on the body -- throttle pitches the nose up and the
+     * brake brings it down, exactly as they do on a real car.
+     *
+     * The wheel turns about its own lateral axis, and forward rolling is a
+     * negative rotation about it, so the reaction the body feels is positive.
+     */
+    wheel.reactionTorque = dt > 0 ? (inertia * (wheel.omega - before)) / dt : 0;
   }
 
   private applyDragAndResistance(velocity: THREE.Vector3): void {

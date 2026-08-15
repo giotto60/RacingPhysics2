@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { DriveLayout } from '../core/params';
 
 /**
  * The car models the picker offers, and the loader that normalises them.
@@ -14,50 +15,98 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
  * geometry between them and only the chosen one is ever needed.
  */
 
+/**
+ * What a vehicle is, as opposed to what it looks like.
+ *
+ * Size, mass and drive layout are authored per class; everything else the
+ * simulation needs -- inertia, spring rates, brake torque, wheelbase, track,
+ * tyre size -- is derived from these and from the model's own geometry, so
+ * adding a vehicle means adding one row rather than a tuning session.
+ *
+ * `power` and `grip` are multipliers on the authored defaults and never drop
+ * below 1: every vehicle got the power and grip rise the defaults carry, and a
+ * fire engine is slow because it weighs nine tonnes, not because it was handed
+ * a weaker engine.
+ */
+export interface CarClass {
+  /** Overall body length and width the model is scaled to, metres. */
+  length: number;
+  width: number;
+  mass: number;
+  power: number;
+  grip: number;
+  layout: DriveLayout;
+  /** Centre of mass height as a fraction of body height. Low is stable. */
+  comHeight: number;
+}
+
+export const CAR_CLASSES = {
+  kart: { length: 2.6, width: 1.4, mass: 210, power: 1.0, grip: 1.2, layout: 'RWD', comHeight: 0.34 },
+  race: { length: 4.7, width: 2.0, mass: 820, power: 1.9, grip: 1.35, layout: 'RWD', comHeight: 0.3 },
+  raceFuture: { length: 4.7, width: 2.0, mass: 870, power: 2.0, grip: 1.35, layout: 'AWD', comHeight: 0.3 },
+  sports: { length: 4.35, width: 1.88, mass: 1280, power: 1.45, grip: 1.15, layout: 'RWD', comHeight: 0.36 },
+  hatch: { length: 4.05, width: 1.8, mass: 1150, power: 1.2, grip: 1.08, layout: 'FWD', comHeight: 0.4 },
+  sedan: { length: 4.6, width: 1.86, mass: 1450, power: 1.25, grip: 1.0, layout: 'RWD', comHeight: 0.38 },
+  taxi: { length: 4.6, width: 1.86, mass: 1580, power: 1.15, grip: 1.0, layout: 'FWD', comHeight: 0.4 },
+  police: { length: 4.75, width: 1.92, mass: 1650, power: 1.6, grip: 1.12, layout: 'RWD', comHeight: 0.37 },
+  suv: { length: 4.85, width: 2.0, mass: 2050, power: 1.35, grip: 1.0, layout: 'AWD', comHeight: 0.45 },
+  van: { length: 5.4, width: 2.1, mass: 2500, power: 1.2, grip: 1.0, layout: 'FWD', comHeight: 0.47 },
+  truck: { length: 6.3, width: 2.35, mass: 4600, power: 1.7, grip: 1.0, layout: 'RWD', comHeight: 0.44 },
+  heavy: { length: 7.4, width: 2.5, mass: 9000, power: 2.6, grip: 1.0, layout: 'RWD', comHeight: 0.46 },
+  ambulance: { length: 5.9, width: 2.25, mass: 3200, power: 1.7, grip: 1.0, layout: 'RWD', comHeight: 0.48 },
+  tractor: { length: 4.0, width: 2.1, mass: 3100, power: 1.3, grip: 1.05, layout: 'RWD', comHeight: 0.5 },
+  classic: { length: 4.7, width: 1.95, mass: 1520, power: 1.5, grip: 1.15, layout: 'RWD', comHeight: 0.38 },
+  blocks: { length: 4.2, width: 1.8, mass: 1200, power: 1.0, grip: 1.0, layout: 'RWD', comHeight: 0.4 },
+} satisfies Record<string, CarClass>;
+
+export type CarClassName = keyof typeof CAR_CLASSES;
+
 export interface CarModelDef {
   id: string;
   label: string;
   /** Path relative to the site root, or null for the built-in box. */
   file: string | null;
+  klass: CarClassName;
   /** Model kits face +Z; the simulation's forward is -Z. */
   faces?: 'forward' | 'backward';
 }
 
-const kenney = (id: string, label: string): CarModelDef => ({
+const kenney = (id: string, label: string, klass: CarClassName): CarModelDef => ({
   id,
   label,
   file: `models/kenney/${id}.glb`,
+  klass,
   faces: 'backward',
 });
 
 export const CAR_MODELS: CarModelDef[] = [
-  { id: 'blocks', label: 'Blocks (built-in)', file: null },
-  { id: 'pony', label: 'Pony cartoon', file: 'models/pony/pony.glb', faces: 'forward' },
-  kenney('sedan', 'Sedan'),
-  kenney('sedan-sports', 'Sedan sports'),
-  kenney('hatchback-sports', 'Hatchback sports'),
-  kenney('race', 'Race'),
-  kenney('race-future', 'Race future'),
-  kenney('suv', 'SUV'),
-  kenney('suv-luxury', 'SUV luxury'),
-  kenney('taxi', 'Taxi'),
-  kenney('police', 'Police'),
-  kenney('ambulance', 'Ambulance'),
-  kenney('firetruck', 'Fire truck'),
-  kenney('garbage-truck', 'Garbage truck'),
-  kenney('delivery', 'Delivery'),
-  kenney('delivery-flat', 'Delivery flatbed'),
-  kenney('truck', 'Truck'),
-  kenney('truck-flat', 'Truck flatbed'),
-  kenney('van', 'Van'),
-  kenney('tractor', 'Tractor'),
-  kenney('tractor-police', 'Tractor police'),
-  kenney('tractor-shovel', 'Tractor shovel'),
-  kenney('kart-oobi', 'Kart oobi'),
-  kenney('kart-oodi', 'Kart oodi'),
-  kenney('kart-ooli', 'Kart ooli'),
-  kenney('kart-oopi', 'Kart oopi'),
-  kenney('kart-oozi', 'Kart oozi'),
+  { id: 'blocks', label: 'Blocks (built-in)', file: null, klass: 'blocks' },
+  { id: 'pony', label: 'Pony cartoon', file: 'models/pony/pony.glb', klass: 'classic', faces: 'forward' },
+  kenney('sedan', 'Sedan', 'sedan'),
+  kenney('sedan-sports', 'Sedan sports', 'sports'),
+  kenney('hatchback-sports', 'Hatchback sports', 'hatch'),
+  kenney('race', 'Race', 'race'),
+  kenney('race-future', 'Race future', 'raceFuture'),
+  kenney('suv', 'SUV', 'suv'),
+  kenney('suv-luxury', 'SUV luxury', 'suv'),
+  kenney('taxi', 'Taxi', 'taxi'),
+  kenney('police', 'Police', 'police'),
+  kenney('ambulance', 'Ambulance', 'ambulance'),
+  kenney('firetruck', 'Fire truck', 'heavy'),
+  kenney('garbage-truck', 'Garbage truck', 'heavy'),
+  kenney('delivery', 'Delivery', 'van'),
+  kenney('delivery-flat', 'Delivery flatbed', 'van'),
+  kenney('truck', 'Truck', 'truck'),
+  kenney('truck-flat', 'Truck flatbed', 'truck'),
+  kenney('van', 'Van', 'van'),
+  kenney('tractor', 'Tractor', 'tractor'),
+  kenney('tractor-police', 'Tractor police', 'tractor'),
+  kenney('tractor-shovel', 'Tractor shovel', 'tractor'),
+  kenney('kart-oobi', 'Kart oobi', 'kart'),
+  kenney('kart-oodi', 'Kart oodi', 'kart'),
+  kenney('kart-ooli', 'Kart ooli', 'kart'),
+  kenney('kart-oopi', 'Kart oopi', 'kart'),
+  kenney('kart-oozi', 'Kart oozi', 'kart'),
 ];
 
 export const modelById = (id: string): CarModelDef =>
@@ -70,8 +119,18 @@ export interface LoadedCarModel {
   wheels: (THREE.Object3D | null)[];
   /** Bounding box of `body` alone, in the model's own units. */
   bodyBox: THREE.Box3;
-  /** Radius of the model's own wheels in its own units, 0 if it has none. */
+  /**
+   * Mean radius of the model's own wheels, its own units, 0 if it has none.
+   * The mean rather than any one of them because the simulation runs a single
+   * wheel size and a tractor's rear tyres are half again its fronts.
+   */
   wheelRadius: number;
+  /** Width of the model's own wheels, its own units. */
+  wheelWidth: number;
+  /** Front-to-rear hub distance in the model's own units, 0 if it has none. */
+  wheelbase: number;
+  /** Left-to-right hub distance in the model's own units, 0 if it has none. */
+  track: number;
 }
 
 const WHEEL_SLOT: Record<string, number> = {
@@ -108,7 +167,9 @@ function normalise(scene: THREE.Object3D, def: CarModelDef): LoadedCarModel {
   // Lift the wheels out of the hierarchy, keeping the world transform the model
   // gave them, then re-centre each on its own hub: the kits model a wheel
   // reaching outward from its node rather than sitting on it.
-  let wheelRadius = 0;
+  let radiusSum = 0;
+  let widthSum = 0;
+  const hubs: THREE.Vector3[] = [];
   for (const node of wheelNodes) {
     const world = node.matrixWorld.clone();
     const slot = WHEEL_SLOT[node.name];
@@ -124,16 +185,27 @@ function normalise(scene: THREE.Object3D, def: CarModelDef): LoadedCarModel {
     holder.updateMatrixWorld(true);
 
     const box = new THREE.Box3().setFromObject(node);
-    node.position.sub(box.getCenter(new THREE.Vector3()));
+    const hub = box.getCenter(new THREE.Vector3());
+    node.position.sub(hub);
     holder.updateMatrixWorld(true);
-    wheelRadius = Math.max(wheelRadius, (box.max.y - box.min.y) / 2);
+    // The hub the model put the wheel on: what the wheelbase, the track and
+    // the tyre's size are all read from, so a vehicle is proportioned by its
+    // own drawing rather than by a number typed next to it.
+    hubs[slot] = hub;
+    radiusSum += (box.max.y - box.min.y) / 2;
+    widthSum += box.max.x - box.min.x;
     wheels[slot] = holder;
   }
+  const found = wheelNodes.length;
+  const wheelRadius = found > 0 ? radiusSum / found : 0;
+  const wheelWidth = found > 0 ? widthSum / found : 0;
+  const wheelbase = hubs[0] && hubs[2] ? Math.abs(hubs[0].z - hubs[2].z) : 0;
+  const track = hubs[0] && hubs[1] ? Math.abs(hubs[0].x - hubs[1].x) : 0;
 
   // Whatever is left is body: shells, spoilers, doors, and the karts' drivers.
   root.updateMatrixWorld(true);
   const bodyBox = new THREE.Box3().setFromObject(root);
-  return { body: root, wheels, bodyBox, wheelRadius };
+  return { body: root, wheels, bodyBox, wheelRadius, wheelWidth, wheelbase, track };
 }
 
 /** Load and normalise a model, once per id. */

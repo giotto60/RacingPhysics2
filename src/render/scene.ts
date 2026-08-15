@@ -37,9 +37,9 @@ export class SceneView {
 
   zoom = 1;
   /**
-   * Pixels to slide the visible window right. The tuning panel occupies the
-   * right-hand edge of the window, so without this the car sits under it
-   * instead of in the middle of what the player can actually see.
+   * Pixels to slide the visible window sideways. Zero puts the car in the
+   * middle of the window; the panel then overlaps the right of the view, which
+   * is the trade the player asked for.
    */
   viewOffsetX = 0;
 

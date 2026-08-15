@@ -3,6 +3,7 @@ import { clamp } from '../core/math';
 import type { Params } from '../core/params';
 import type { Car } from './car';
 import { InterpolatedBody } from '../render/interpolated';
+import { repaint } from './tint';
 import {
   CAR_MODELS,
   instantiate,
@@ -26,17 +27,6 @@ import {
  * so the thing on screen is the thing being simulated rather than a decoration
  * sitting near it.
  */
-
-/**
- * Height of the hull box's underside above the tyre contact patch, metres.
- *
- * The drawn body sits on this line, so it is a car's ground clearance -- but it
- * is also a square-cornered box where the real thing has a rounded nose, so it
- * catches a ramp earlier than the shape suggests. Swept against the big ramp
- * taken at 30 m/s: 0.16 costs 1.4 m/s of entry speed and twelve scrape events,
- * 0.24 costs half a metre a second and five, and past 0.28 nothing improves.
- */
-const GROUND_CLEARANCE = 0.24;
 
 interface Deformable {
   mesh: THREE.Mesh;
@@ -67,10 +57,11 @@ export class CarView {
 
   private model: CarModelDef = CAR_MODELS[0];
   private loaded: LoadedCarModel | null = null;
-  /** The authored hull box, restored whenever the built-in body is picked. */
-  private readonly authoredHull: { height: number; offsetY: number };
   /** Guards against a slow load landing after the player has picked again. */
   private loadToken = 0;
+
+  /** Hue rotation applied to this car's paint, degrees. 0 leaves it alone. */
+  hueShift = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -78,7 +69,6 @@ export class CarView {
     private params: Params,
     private colour = 0xd94f3d,
   ) {
-    this.authoredHull = { height: params.chassis.hullHeight, offsetY: params.chassis.hullOffsetY };
     this.group.add(this.bodyRoot);
     this.group.add(this.lightRig);
     this.buildLights();
@@ -107,10 +97,6 @@ export class CarView {
     if (def.file === null) {
       this.model = def;
       this.loaded = null;
-      // Back to the box the physics was authored and measured against, rather
-      // than leaving it wearing the last model's dimensions.
-      this.params.chassis.hullHeight = this.authoredHull.height;
-      this.params.chassis.hullOffsetY = this.authoredHull.offsetY;
       this.buildBlocks();
       this.applyWheels();
       this.params.expression.carModel = def.id;
@@ -128,38 +114,12 @@ export class CarView {
     if (token !== this.loadToken) return; // a later pick already won
     this.model = def;
     this.loaded = loaded;
-    this.suggestHullFor(loaded);
     this.buildFromModel(loaded);
     this.applyWheels();
     // Kept in step even when a load failed and dropped back to the box, so the
     // picker never claims to be showing something it is not.
     this.params.expression.carModel = def.id;
     this.onHullChanged?.();
-  }
-
-  /**
-   * Size the hull box to the model before fitting it, so a picked car keeps its
-   * own proportions instead of being squashed into the last one's box. Only the
-   * height and the ride height are derived: length and width stay the numbers
-   * the player tuned, and the model is fitted to them.
-   */
-  private suggestHullFor(loaded: LoadedCarModel): void {
-    const c = this.params.chassis;
-    const s = this.params.suspension;
-    const size = loaded.bodyBox.getSize(new THREE.Vector3());
-    const sx = c.hullWidth / Math.max(1e-3, size.x);
-    // Height follows the width scale, so the view the player mostly sees a car
-    // head-on in keeps the proportions it was modelled with, and only the
-    // length is stretched to reach the wheelbase the simulation is tuned for.
-    // Scaling height with the length instead turns a kart into a tower.
-    const height = size.y * sx;
-
-    const stiffness = Math.max(1, (s.stiffnessFront + s.stiffnessRear) / 2);
-    const settle = clamp((c.mass * 9.81 * 0.25) / stiffness, 0, s.maxTravel);
-    const contactY = s.hardpointY - (s.restLength - settle) - s.wheelRadius;
-
-    c.hullHeight = height;
-    c.hullOffsetY = contactY + GROUND_CLEARANCE + height / 2;
   }
 
   // --- body construction ----------------------------------------------------
@@ -237,6 +197,7 @@ export class CarView {
       c.hullOffsetY - centre.y * scale.y,
       -centre.z * scale.z,
     );
+    repaint(holder, this.hueShift, this.colour);
     this.bodyRoot.add(holder);
     this.trackDeformable(holder);
     this.placeLights();
@@ -304,6 +265,7 @@ export class CarView {
       return;
     }
     const wheels = instantiate(loaded).wheels;
+    for (const wheel of wheels) if (wheel) repaint(wheel, this.hueShift, this.colour);
     this.clearWheels();
     const scale = this.params.suspension.wheelRadius / loaded.wheelRadius;
     this.wheelMeshes.forEach((wheelGroup, i) => {

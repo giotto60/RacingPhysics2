@@ -40,6 +40,36 @@
 - [x] Parked cars in three sizes.
 - [x] Screen reduced to a speedometer and the map; diagnostics are opt-in.
 
+## Racing pass
+
+- [x] A proper figure-8: a lemniscate of Bernoulli, 865 m, crossing at right
+      angles, kerbs at both tips, nothing placed on the racing surface.
+- [x] Every model is its own vehicle. Size, mass, power, grip and drive layout
+      per class; wheelbase, track, tyre size, inertia, spring rates, brake
+      torque, steering lock and drag all derived.
+- [x] Wheels in proportion: the tyre keeps the size it was drawn at, and the
+      simulation runs on that radius.
+- [x] Half again the power and grip of the old defaults, on every vehicle.
+- [x] Two computer-driven opponents in the player's car, in other colours,
+      gridded up on every reset.
+- [x] Reverse that works: -3.1 m/s after six seconds became -17.1.
+- [x] The car centred in the window.
+- [x] Jumps that do not throw the car onto its back, by finishing the ramp
+      profile straight and by giving the chassis the wheels' reaction torque.
+
+| Check | Result |
+|---|---|
+| Lap | 865 m, extents 330 x 116 m, flat |
+| 0 to 100 km/h | 4.78 s, 170 km/h after ten seconds |
+| Reverse from a standstill, six seconds | -17.1 m/s, was -3.1 |
+| Big ramp at 30 m/s, coasting | leaves at 1.8 deg, peaks at 2.2, lands at 2.2 |
+| Same jump, throttle held | peaks at 11.2 deg nose-up |
+| Same jump, brake in the air | lands at -4.5 deg, nose down |
+| Opponents, alone, ten laps | never left the ground, 57 km/h through the tips, 124 on the straights |
+| Opponents, together | hold station, no contact, no rescues needed |
+| Sedan / race / fire truck | 1450 / 820 / 9000 kg, 619 / 941 / 1287 Nm, 2.38 / 2.79 / 3.53 m wheelbase |
+| Tyre radius, sedan / race / tractor | 0.37 / 0.50 / 0.61 m, each the model's own |
+
 ## Car models
 
 - [x] A picker for the two supplied kits: twenty-five Kenney vehicles, the Pony
@@ -164,10 +194,19 @@ building and were deliberately left out:
 - Hitting the back of the jump's lip at speed is now a wall rather than
   something to fall through, which means it stops the car dead. That is the
   honest outcome for a 1.7 m step taken the wrong way round.
-- A model is stretched to the hull's footprint, and the two kits are chunkier
+- A model is stretched to its class footprint, and the two kits are chunkier
   than a real car, so every vehicle is a little longer than it was modelled.
-  The wheel arches end up about 20 cm outside the simulated wheelbase on the
-  Kenney bodies. Fixing it properly means letting the model set the wheelbase
-  and track, which would retune the handling every time the paint changes.
-- The karts are stretched hardest, because a kart is not four metres long. They
-  are in the list because they were in the kit, not because they read well.
+  The wheelbase and the tyre size now come from the model, so the wheels sit
+  where the arches are; only the body is stretched.
+- Kenney's hubs are far enough under the body that the track has to be floored
+  at 85% of the width. On the models where the floor bites, the wheels sit a
+  little wider than the arches they came with.
+- Only one wheel size per vehicle, so a tractor's big rear tyres are drawn at
+  the mean of its four. Per-wheel radii would fix it and touch the ray length,
+  the slip ratio and the visual, which is more than three tractors are worth.
+- The computer drivers hold a fixed line rather than an apex-to-apex racing
+  line, and they lift rather than catch a slide. They lap cleanly and they will
+  not trouble anyone who is trying.
+- The verified table above the fault pass was measured before this pass. The
+  collision rows in it predate the mass, grip and hull changes and are stale;
+  the rows in this section are current.
