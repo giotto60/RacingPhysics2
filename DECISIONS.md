@@ -2,6 +2,50 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## Car models — a picker for the two supplied kits
+
+- **The model is fitted to the car, never the car to the model.** Mass, centre
+  of mass, inertia, wheelbase, track, springs, tyres and drivetrain are the
+  tuning; a paint job does not get to overwrite them. A scripted stint --
+  standing start, corner, brake to a stop -- lands on the same speed, the same
+  body slip and the same final position to the millimetre whichever of the
+  twenty-seven models is drawn.
+- **The hull collider is the drawn body's box.** The one thing a model does
+  change is the shape you crash with, because a drawn body that is not what the
+  car collides with is exactly the sort of lie this project avoids: the race car
+  is 0.95 m tall and the ambulance 1.92 m, and both hit things as they look.
+  Picking "Blocks (built-in)" restores the authored 0.8 m box, which is what
+  every number in the verified table was measured against.
+- **This also gave the four hull sliders their first effect on anything.** They
+  moved the drawn box and left the collider at its construction size, because
+  nothing ever resized it. `Car.applyHullShape` now does.
+- **Length and width come from the tuning, height from the model.** A model is
+  stretched to the hull's footprint, so its wheel arches sit near the simulated
+  wheels, and its height is scaled with the *width* so the view a car is mostly
+  seen from keeps the proportions it was modelled with. Scaling height with the
+  length instead turns a kart into a three-metre tower.
+- **Ground clearance is 0.24 m, chosen by measurement rather than by eye.** The
+  drawn body sits on the hull box, so the box's underside is the car's ground
+  clearance -- but it is a square-cornered box where the real thing has a
+  rounded nose, and it catches a ramp earlier than the shape suggests. Swept
+  against the big ramp at 30 m/s: 0.16 m costs 1.4 m/s of entry speed and twelve
+  scrape events, 0.24 m costs half that and five, and past 0.28 m nothing
+  improves.
+- **Wheels are the model's own where it has them.** Both kits name them, so they
+  are lifted out of the hierarchy, re-centred on their hubs, scaled to the
+  simulated wheel radius and hung on the suspension -- which means they carry
+  the real compression, the real rack angle and the real spin. The Pony is a
+  single welded mesh with no separable wheels, so it keeps the built-in ones.
+- **Models are fetched at runtime, not bundled.** The textures in this project
+  are drawn into canvases at boot precisely so the build stays one file, and
+  5 MB of geometry does not belong in a JavaScript bundle. Only the chosen model
+  is ever fetched, and each is cached after its first load.
+- **The picker sits at the top level of the panel**, not in a folder: it is the
+  only control there that changes what the player is looking at.
+- **The nose marker is drawn only in blocks mode.** It exists so heading is
+  readable at a glance in an isometric view; a car-shaped car does that by
+  itself, and the wedge just looks like a wart on one.
+
 ## Fault pass — lighting, markings, resistance, gearbox, ground contact
 
 - **Rolling resistance is a torque at the wheel, not a force at the contact

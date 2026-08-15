@@ -1,4 +1,5 @@
 import GUI from 'lil-gui';
+import { CAR_MODELS } from '../vehicle/models';
 import {
   applyParams,
   builtinPresets,
@@ -13,6 +14,7 @@ export interface PanelHooks {
   onChassisChanged(): void;
   onSuspensionGeometryChanged(): void;
   onHullChanged(): void;
+  onCarModelChanged(): void;
   onPropMassChanged(): void;
   onSolverChanged(): void;
   onPresetApplied(): void;
@@ -59,6 +61,7 @@ export class DebugPanel {
     this.presets = [...builtinPresets(), ...loadStoredPresets()];
 
     this.buildSimulation();
+    this.buildCarModel();
     this.buildPresets();
     this.buildChassis();
     this.buildSuspension();
@@ -99,6 +102,22 @@ export class DebugPanel {
     f.add({ go: () => this.hooks.toggleDebugDraw() }, 'go').name('debug draw  [g]');
     f.add({ go: () => this.hooks.toggleMiniMap() }, 'go').name('map');
     f.add({ go: () => this.hooks.startAudio() }, 'go').name('enable audio');
+  }
+
+  // --- car model ------------------------------------------------------------
+
+  /**
+   * The picker sits at the top level rather than inside a folder: it is the one
+   * control here that changes what the player is looking at.
+   */
+  private buildCarModel(): void {
+    const options: Record<string, string> = {};
+    for (const model of CAR_MODELS) options[model.label] = model.id;
+    this.gui
+      .add(this.params.expression, 'carModel', options)
+      .name('car model')
+      .listen()
+      .onChange(() => this.hooks.onCarModelChanged());
   }
 
   // --- presets ------------------------------------------------------------

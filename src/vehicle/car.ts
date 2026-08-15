@@ -207,6 +207,24 @@ export class Car {
   }
 
   /**
+   * Resize the hull collider from the authored dimensions.
+   *
+   * This is what makes the car model picker honest: whatever body is drawn, the
+   * box the car actually collides with is that body's box. It is also the only
+   * thing that ever made the four hull sliders mean anything -- before this they
+   * moved the drawn box and left the collider at its construction size.
+   */
+  applyHullShape(): void {
+    const c = this.params.chassis;
+    this.collider.setHalfExtents({
+      x: Math.max(0.05, c.hullWidth * 0.5),
+      y: Math.max(0.05, c.hullHeight * 0.5),
+      z: Math.max(0.05, c.hullLength * 0.5),
+    });
+    this.collider.setTranslationWrtParent({ x: 0, y: c.hullOffsetY, z: 0 });
+  }
+
+  /**
    * Authored mass, centre of mass and inertia tensor. Rapier's auto-computed
    * tensor from a uniform-density box is wrong for a car -- yaw inertia in
    * particular governs how fast the car spins after a hit, so all three

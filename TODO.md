@@ -40,6 +40,29 @@
 - [x] Parked cars in three sizes.
 - [x] Screen reduced to a speedometer and the map; diagnostics are opt-in.
 
+## Car models
+
+- [x] A picker for the two supplied kits: twenty-five Kenney vehicles, the Pony
+      Cartoon, and the built-in box. Top of the panel, applies immediately, and
+      it rides in presets and exported JSON like any other parameter.
+- [x] The model's own wheels carry the real suspension travel, rack angle and
+      wheel spin. The Pony has no separable wheels and keeps the built-in ones.
+- [x] The hull collider follows the drawn body, so each vehicle hits things as
+      it looks. Picking the built-in box restores the authored hull exactly.
+- [x] Handling is untouched by the choice: an identical scripted stint ends on
+      the same speed, body slip and position to the millimetre for every model.
+
+| Check | Result |
+|---|---|
+| Every model in the picker, loaded and fitted | 27 of 27, no failures |
+| Drawn footprint against the hull, all models | 4.21 x 1.80 m against 4.2 x 1.8 |
+| Drawn body against the collider, all models | agree within 1.5 cm on every axis |
+| Derived height, race car / sedan / ambulance | 0.95 / 1.38 / 1.92 m |
+| Scripted stint across five models | identical to the millimetre |
+| Upside down and on its side, with a model | rests on roof and flank, 0.001 m |
+| Model load, cold | 100 ms for the Pony, under 40 ms for a Kenney vehicle |
+| Bundle | models fetched at runtime, 5.6 MB on disk, one at a time |
+
 ## Fault pass
 
 Reported after driving it. Each one measured before and after, in headless
@@ -74,15 +97,18 @@ Chromium against the production bundle.
 
 ## Verified behaviour
 
-Measured in headless Chromium against the production bundle. These are the
-numbers to compare against if a change makes the car feel different.
+Measured in headless Chromium against the production bundle, on the default
+car model. These are the numbers to compare against if a change makes the car
+feel different. Anything that touches the hull box -- which now includes picking
+a different car -- moves the collision rows; picking the built-in box restores
+the shape the rest of the table was authored against.
 
 | Check | Result |
 |---|---|
-| Wall graze at 5 degrees, 30 m/s, exceptions on | 26.9 m/s out, 28.7 with rolling resistance zeroed |
-| Same graze, exceptions off | 0.7 m/s out |
-| Head-on wall at 30 m/s | 0.0 m/s out |
-| Cone / tyre stack / barrier / dumpster at 30 m/s | 3.7 / 6.2 / 16.2 / 18.7 m/s lost |
+| Wall graze at 5 degrees, 30 m/s, exceptions on | 26.2 m/s out, 28.7 with rolling resistance zeroed |
+| Same graze, exceptions off | 2.7 m/s out |
+| Head-on wall at 30 m/s | 0.3 m/s out |
+| Cone / tyre stack / barrier / dumpster at 30 m/s | 3.7 / 5.8 / 15.9 / 18.2 m/s lost |
 | LSD locked vs open, full throttle on low grip | rear wheel spread 1 vs 112 rad/s |
 | Combined slip on vs off, same corner entry | 6 deg vs 88 deg of body slip |
 | Braking load transfer, front vs rear | 8316 N front / 3546 N rear |
@@ -91,13 +117,13 @@ numbers to compare against if a change makes the car feel different.
 | Presets | Grippy / Loose / Heavy apply live, including chassis mass |
 | Reverse from a standstill, brake held | in reverse gear at 0.5 s, -3.1 m/s at 6 s |
 | Coast-down from 38 m/s | 2.8 m/s^2, top speed 201 km/h |
-| Big ramp, entered at 30 m/s | 2.43 s airborne, 4.2 m peak |
-| Square hit on a parked saloon at 30 m/s | 17.2 m/s lost |
+| Big ramp, entered at 30 m/s | 28.2 m/s onto it, 4.0 m peak |
+| Square hit on a parked saloon at 30 m/s | 17.6 m/s lost |
 | Surface strip, one run | tarmac, dirt, grass, gravel, kerb, all five |
 | Standing start, full throttle, clean surface | one shift, `1 2 3 4` at 69 / 104 / 145 km/h |
 | Same start with grip pulled to a third | one shift, `1 2` at 68 km/h |
 | Left alone for five seconds | no drift, no dust, no marks |
-| 9 m drop onto the flat | hull keeps 0.21 m, settles back to 0.802 m ride height |
+| 9 m drop onto the flat | bottoms out, hull kisses the road at 0.003 m, settles back to 0.802 m |
 | Back of the jump lip at 50 and 70 m/s | stays on top of the road, 0.79 m minimum |
 | Upside down, on its side | rests on roof and on flank, mesh matches body to 0.1 deg |
 
@@ -138,3 +164,10 @@ building and were deliberately left out:
 - Hitting the back of the jump's lip at speed is now a wall rather than
   something to fall through, which means it stops the car dead. That is the
   honest outcome for a 1.7 m step taken the wrong way round.
+- A model is stretched to the hull's footprint, and the two kits are chunkier
+  than a real car, so every vehicle is a little longer than it was modelled.
+  The wheel arches end up about 20 cm outside the simulated wheelbase on the
+  Kenney bodies. Fixing it properly means letting the model set the wheelbase
+  and track, which would retune the handling every time the paint changes.
+- The karts are stretched hardest, because a kart is not four metres long. They
+  are in the list because they were in the kit, not because they read well.

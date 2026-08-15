@@ -6,6 +6,7 @@ import { defaultParams } from './core/params';
 import { Input } from './core/input';
 import { Car } from './vehicle/car';
 import { CarView } from './vehicle/carView';
+import { CAR_MODELS } from './vehicle/models';
 import {
   buildTrack,
   spawnOnCentreline,
@@ -44,6 +45,9 @@ async function boot(): Promise<void> {
 
   const car = new Car(physics, params, spawn.position, spawn.heading);
   const carView = new CarView(view.scene, car, params);
+  // Whatever body is drawn, the collider is that body's box.
+  carView.onHullChanged = () => car.applyHullShape();
+  void carView.setModel(params.expression.carModel);
 
   const props = new PropWorld(physics, view.scene, params);
   placeProps(props, view.scene, track.centreline);
@@ -196,8 +200,15 @@ async function boot(): Promise<void> {
 
   const panel = new DebugPanel(params, loop, {
     onChassisChanged: () => car.applyMassProperties(),
-    onSuspensionGeometryChanged: () => car.refreshGeometry(),
-    onHullChanged: () => carView.rebuildHull(),
+    onSuspensionGeometryChanged: () => {
+      car.refreshGeometry();
+      carView.applyWheels();
+    },
+    onHullChanged: () => {
+      carView.applyHull();
+      car.applyHullShape();
+    },
+    onCarModelChanged: () => void carView.setModel(params.expression.carModel),
     onPropMassChanged: () => props.refreshAllMassProperties(),
     onSolverChanged: () => {
       physics.applySolverConfig();
@@ -207,7 +218,9 @@ async function boot(): Promise<void> {
     onPresetApplied: () => {
       car.applyMassProperties();
       car.refreshGeometry();
-      carView.rebuildHull();
+      // The model comes back with the preset, and it is what decides the hull
+      // box, so the collider follows once it has landed.
+      void carView.setModel(params.expression.carModel).then(() => carView.applyWheels());
       props.refreshAllMassProperties();
       physics.applySolverConfig();
     },
@@ -285,6 +298,7 @@ async function boot(): Promise<void> {
   (window as unknown as Record<string, unknown>).rp2 = {
     car,
     carView,
+    carModels: CAR_MODELS,
     params,
     physics,
     loop,

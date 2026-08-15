@@ -142,6 +142,8 @@ export interface Params {
   };
 
   expression: {
+    /** Which car model is drawn. See `vehicle/models.ts` for the catalogue. */
+    carModel: string;
     visualRollMultiplier: number;
     visualPitchMultiplier: number;
     skidThreshold: number;
@@ -333,6 +335,7 @@ export const defaultParams = (): Params => ({
   },
 
   expression: {
+    carModel: 'sedan',
     visualRollMultiplier: 1.75,
     visualPitchMultiplier: 1.75,
     skidThreshold: 0.22,
