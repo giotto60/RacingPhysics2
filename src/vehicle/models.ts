@@ -38,25 +38,32 @@ export interface CarClass {
   layout: DriveLayout;
   /** Centre of mass height as a fraction of body height. Low is stable. */
   comHeight: number;
+  /**
+   * Flat-out speed in top gear, m/s. The whole gearbox is geared from this and
+   * the wheel's radius, because a fixed final drive on a 0.5 m truck wheel
+   * leaves the engine below idle at walking pace and the vehicle pulling away
+   * on the weakest torque it has.
+   */
+  topSpeed: number;
 }
 
 export const CAR_CLASSES = {
-  kart: { length: 2.6, width: 1.4, mass: 210, power: 1.0, grip: 1.2, layout: 'RWD', comHeight: 0.34 },
-  race: { length: 4.7, width: 2.0, mass: 820, power: 1.9, grip: 1.35, layout: 'RWD', comHeight: 0.3 },
-  raceFuture: { length: 4.7, width: 2.0, mass: 870, power: 2.0, grip: 1.35, layout: 'AWD', comHeight: 0.3 },
-  sports: { length: 4.35, width: 1.88, mass: 1280, power: 1.45, grip: 1.15, layout: 'RWD', comHeight: 0.36 },
-  hatch: { length: 4.05, width: 1.8, mass: 1150, power: 1.2, grip: 1.08, layout: 'FWD', comHeight: 0.4 },
-  sedan: { length: 4.6, width: 1.86, mass: 1450, power: 1.25, grip: 1.0, layout: 'RWD', comHeight: 0.38 },
-  taxi: { length: 4.6, width: 1.86, mass: 1580, power: 1.15, grip: 1.0, layout: 'FWD', comHeight: 0.4 },
-  police: { length: 4.75, width: 1.92, mass: 1650, power: 1.6, grip: 1.12, layout: 'RWD', comHeight: 0.37 },
-  suv: { length: 4.85, width: 2.0, mass: 2050, power: 1.35, grip: 1.0, layout: 'AWD', comHeight: 0.45 },
-  van: { length: 5.4, width: 2.1, mass: 2500, power: 1.2, grip: 1.0, layout: 'FWD', comHeight: 0.47 },
-  truck: { length: 6.3, width: 2.35, mass: 4600, power: 1.7, grip: 1.0, layout: 'RWD', comHeight: 0.44 },
-  heavy: { length: 7.4, width: 2.5, mass: 9000, power: 2.6, grip: 1.0, layout: 'RWD', comHeight: 0.46 },
-  ambulance: { length: 5.9, width: 2.25, mass: 3200, power: 1.7, grip: 1.0, layout: 'RWD', comHeight: 0.48 },
-  tractor: { length: 4.0, width: 2.1, mass: 3100, power: 1.3, grip: 1.05, layout: 'RWD', comHeight: 0.5 },
-  classic: { length: 4.7, width: 1.95, mass: 1520, power: 1.5, grip: 1.15, layout: 'RWD', comHeight: 0.38 },
-  blocks: { length: 4.2, width: 1.8, mass: 1200, power: 1.0, grip: 1.0, layout: 'RWD', comHeight: 0.4 },
+  kart: { length: 2.6, width: 1.4, mass: 210, power: 1.0, grip: 1.2, layout: 'RWD', comHeight: 0.34, topSpeed: 34 },
+  race: { length: 4.7, width: 2.0, mass: 820, power: 1.6, grip: 1.35, layout: 'RWD', comHeight: 0.3, topSpeed: 84 },
+  raceFuture: { length: 4.7, width: 2.0, mass: 870, power: 1.7, grip: 1.35, layout: 'AWD', comHeight: 0.3, topSpeed: 86 },
+  sports: { length: 4.35, width: 1.88, mass: 1280, power: 1.3, grip: 1.15, layout: 'RWD', comHeight: 0.36, topSpeed: 74 },
+  hatch: { length: 4.05, width: 1.8, mass: 1150, power: 1.1, grip: 1.08, layout: 'FWD', comHeight: 0.4, topSpeed: 60 },
+  sedan: { length: 4.6, width: 1.86, mass: 1450, power: 1.15, grip: 1.0, layout: 'RWD', comHeight: 0.38, topSpeed: 64 },
+  taxi: { length: 4.6, width: 1.86, mass: 1580, power: 1.05, grip: 1.0, layout: 'FWD', comHeight: 0.4, topSpeed: 57 },
+  police: { length: 4.75, width: 1.92, mass: 1650, power: 1.35, grip: 1.12, layout: 'RWD', comHeight: 0.37, topSpeed: 70 },
+  suv: { length: 4.85, width: 2.0, mass: 2050, power: 1.2, grip: 1.0, layout: 'AWD', comHeight: 0.45, topSpeed: 57 },
+  van: { length: 5.4, width: 2.1, mass: 2500, power: 1.1, grip: 1.0, layout: 'FWD', comHeight: 0.47, topSpeed: 48 },
+  truck: { length: 6.3, width: 2.35, mass: 4600, power: 1.15, grip: 1.0, layout: 'RWD', comHeight: 0.44, topSpeed: 42 },
+  heavy: { length: 7.4, width: 2.5, mass: 9000, power: 1.3, grip: 1.0, layout: 'RWD', comHeight: 0.46, topSpeed: 34 },
+  ambulance: { length: 5.9, width: 2.25, mass: 3200, power: 1.2, grip: 1.0, layout: 'RWD', comHeight: 0.48, topSpeed: 46 },
+  tractor: { length: 4.0, width: 2.1, mass: 3100, power: 1.0, grip: 1.05, layout: 'RWD', comHeight: 0.5, topSpeed: 22 },
+  classic: { length: 4.7, width: 1.95, mass: 1520, power: 1.3, grip: 1.15, layout: 'RWD', comHeight: 0.38, topSpeed: 70 },
+  blocks: { length: 4.2, width: 1.8, mass: 1200, power: 1.0, grip: 1.0, layout: 'RWD', comHeight: 0.4, topSpeed: 62 },
 } satisfies Record<string, CarClass>;
 
 export type CarClassName = keyof typeof CAR_CLASSES;

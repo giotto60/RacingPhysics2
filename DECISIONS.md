@@ -2,6 +2,34 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## Framing and rollover
+
+- **The centre of mass is capped so every vehicle slides before it tips.** A car
+  tips when the cornering force exceeds half its track divided by the height of
+  its mass, and at the grip these cars now have, the height that follows is low:
+  0.29 m for a saloon. That is the honest consequence of asking two g out of a
+  road car -- the alternative is a car that rolls over the first time it is asked
+  to corner properly, which is what it did. The cap is derived from each
+  vehicle's own track and grip with a 25% margin, so it holds for a kart and for
+  a nine-tonne fire engine without either being given a number of its own.
+- **The camera no longer leads the car.** The lead was 0.32 m per m/s, and
+  because the rig's yaw lags the car's through a corner it moved the car
+  sideways across the screen as well as backwards: measured at 27 px right and
+  51 px below centre mid-corner. It is zero by default, the car sits within a
+  pixel of the middle of the window in every state, and the slider is still
+  there for anyone who wants the extra road ahead.
+- **`camera.framingX` moves the car across the screen**, as a fraction of the
+  window's width. Zero is the middle of the window; about -0.13 is the middle of
+  the part the tuning panel is not covering, which is the other thing "the
+  middle of the screen" can reasonably mean.
+- **The gearbox is geared from the wheel it turns.** A fixed final drive is fine
+  for one wheel size and wrong for every other: on a truck's half-metre wheel it
+  left the engine below idle at walking pace, so a nine-tonne fire engine pulled
+  away on the weakest torque it has and reached 1 km/h in six seconds. The final
+  drive now comes from the wheel radius and the class's top speed, which puts
+  0-100 km/h at 2.6 s for a kart, 4.5 for a saloon, 12.6 for a truck, and never
+  for the fire engine.
+
 ## Racing pass — a real circuit, opponents, and a vehicle per model
 
 - **Every vehicle is derived, not tuned.** The class table in `models.ts` says

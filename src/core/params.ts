@@ -221,13 +221,23 @@ export interface Params {
     followOffset: number;
     /** Half-life in seconds for the yaw-follow damping in mode B. */
     yawDamping: number;
-    /** Metres of lead per m/s of speed. */
+    /**
+     * Metres the camera looks ahead of the car per m/s of speed. Anything above
+     * zero takes the car off the centre of the screen, and does it sideways as
+     * well as forwards, because the rig's yaw lags the car's through a corner.
+     */
     leadFactor: number;
     /** Extra view height per m/s of speed. */
     pullbackFactor: number;
     baseViewHeight: number;
     pitch: number;
     followDamping: number;
+    /**
+     * Where the car sits across the window, as a fraction of its width from the
+     * middle. Zero is the middle of the window; about -0.13 is the middle of
+     * the part the tuning panel is not covering.
+     */
+    framingX: number;
   };
 }
 
@@ -404,12 +414,15 @@ export const defaultParams = (): Params => ({
     mode: 'B-follow',
     fixedYaw: 45,
     followOffset: 0,
-    yawDamping: 0.45,
-    leadFactor: 0.32,
+    yawDamping: 0.3,
+    // Zero: the car stays in the middle of the screen, which is worth more than
+    // the extra road the lead used to buy. The slider is still there.
+    leadFactor: 0,
     pullbackFactor: 0.34,
     baseViewHeight: 26,
     pitch: Math.atan(Math.SQRT1_2),
     followDamping: 0.06,
+    framingX: 0,
   },
 });
 

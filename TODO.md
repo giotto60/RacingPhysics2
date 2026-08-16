@@ -70,6 +70,34 @@
 | Sedan / race / fire truck | 1450 / 820 / 9000 kg, 619 / 941 / 1287 Nm, 2.38 / 2.79 / 3.53 m wheelbase |
 | Tyre radius, sedan / race / tractor | 0.37 / 0.50 / 0.61 m, each the model's own |
 
+## Framing and rollover
+
+- [x] The car in the middle of the window, in every state. The camera lead was
+      moving it sideways through a corner because the rig's yaw lags the car's;
+      the lead is zero by default and the slider is still there.
+- [x] `camera.framingX` on the panel, for anyone who wants the car offset from
+      the middle -- about -0.13 centres it in the part the panel is not over.
+- [x] Every vehicle slides before it tips. The centre of mass is capped from the
+      vehicle's own track and grip with a 25% margin, so the tyres always let go
+      first, from a kart to a nine-tonne fire engine.
+- [x] The gearbox geared from the wheel it turns. A fixed final drive left a
+      truck's engine below idle at walking pace; it now comes from the wheel
+      radius and the class's top speed.
+
+| Check | Result |
+|---|---|
+| Car across the window, at rest / driving / cornering | 640 / 640 / 640 px of 1280, was 667 cornering |
+| Car up the window, same three states | 400 / 397 / 397 px of 800, was 451 |
+| Tip threshold, sedan / race / SUV / fire truck / box | 2.72 / 3.68 / 2.73 / 2.73 / 2.73 g against 2.18-2.94 of grip |
+| Full lock held at speed, those five vehicles | worst tilt 1 deg, none lifted a wheel, none flipped |
+| Centre of mass, race / sedan / SUV / fire truck | 0.23 / 0.29 / 0.31 / 0.39 m above the contact patch |
+| 0 to 100 km/h, kart / race / sports / sedan | 2.62 / 2.69 / 3.78 / 4.48 s |
+| Same, SUV / van / tractor / truck | 5.01 / 7.27 / 9.38 / 12.63 s |
+| Same, fire engine | never; 94 km/h after thirty seconds |
+| Derived final drive, race / sedan / truck / fire engine | 5.92 / 5.78 / 11.13 / 12.00 |
+| Opponents, six laps each, stepped at the fixed rate | no rescues, 166-167 km/h, hull 0.80-0.95 m, worst tilt 2 deg |
+| Same run, wheels off the racing surface | 0.0 s of 150 for one driver, 1.6 s for the other |
+
 ## Car models
 
 - [x] A picker for the two supplied kits: twenty-five Kenney vehicles, the Pony
@@ -187,10 +215,23 @@ building and were deliberately left out:
 - Driving over a Class C barrier lifts the car about half a metre as it climbs
   the collider. It is geometric ride-up rather than an impulse launch, so the
   vertical impulse suppression does not catch it.
-- First gear runs to 68 km/h on the authored ratios, so a clean standing start
-  holds first for a long time before the only upshift a short run ever sees.
-  The gearing is a slider set, not a bug, but it is the first thing to try if
-  the box feels lazy.
+- First gear runs a long way up the speed range, so a clean standing start holds
+  it for a while before the only upshift a short run ever sees. The ratios are a
+  slider set and the final drive is derived, so this is the first thing to try
+  if the box feels lazy.
+- The centre-of-mass cap is what stops these cars rolling over, and at two g of
+  grip it puts the mass lower than a tall vehicle really carries it -- a fire
+  engine's mass sits 0.39 m up. Give a class less grip and its mass is allowed
+  back where its shape says it should be; ask for two g and this is the price.
+- The fire engine never reaches 100 km/h -- 94 after thirty seconds. That is
+  about right for what it is, but it means one row of the acceleration table is
+  empty rather than slow.
+- A 9 m drop dips a drawn wheel 11.6 cm into the road for about a tenth of a
+  second, and the hull box with it. The fault pass measured this at zero, but
+  that was on the authored springs; every vehicle now carries rates scaled to
+  its own mass and the bump stop is briefly outrun again. Down from 27 cm before
+  the fault pass, and it is not the centre-of-mass cap -- the same drop measures
+  11.6 cm with the cap lifted.
 - Hitting the back of the jump's lip at speed is now a wall rather than
   something to fall through, which means it stops the car dead. That is the
   honest outcome for a 1.7 m step taken the wrong way round.

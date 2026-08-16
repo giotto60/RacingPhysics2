@@ -45,6 +45,13 @@ const FALLBACK_WHEELBASE = 0.6;
  */
 export const GROUND_CLEARANCE = 0.24;
 
+/**
+ * How much more cornering force it takes to tip a car than its tyres can
+ * generate. Above 1 the tyres always let go first, which is what makes a car
+ * slide instead of rolling over.
+ */
+const ROLLOVER_MARGIN = 1.25;
+
 export interface VehicleSetup {
   /** Scale applied to the model's own units to reach the authored size. */
   scaleX: number;
@@ -144,19 +151,47 @@ export function applyVehicleSetup(
   c.hullOffsetY = contactY + GROUND_CLEARANCE + h / 2;
 
   // --- centre of mass ------------------------------------------------------
-  // Measured from the body's floor rather than from the chassis origin, so a
-  // van's mass sits high in its own body and a race car's sits low in its own.
+  //
+  // Measured from the body's floor, so a van's mass sits high in its own body
+  // and a race car's sits low in its own -- but capped so that every vehicle
+  // slides before it tips.
+  //
+  // A car tips when the cornering force exceeds half its track divided by the
+  // height of its mass. At the grip these cars have, the height that follows is
+  // low: 0.32 m for a saloon. That is the honest consequence of asking for two
+  // g out of a road car, and the alternative is a car that rolls over the first
+  // time it is asked to corner properly. The cap scales with the vehicle, so it
+  // holds for a kart and for a nine-tonne fire engine without either being
+  // given a number of its own.
   const floor = c.hullOffsetY - h / 2;
-  c.comY = floor + h * klass.comHeight;
+  const track = (s.trackFront + s.trackRear) * 0.5;
+  // The class's own grip, not whatever the last vehicle left in the params.
+  const grip = BASE.tyre.peakGrip * klass.grip;
+  const tipSafe = (track * 0.5) / (grip * ROLLOVER_MARGIN);
+  // Measured from the tyres at full droop rather than from where they settle,
+  // so the margin is the margin however hard the springs are working.
+  const groundY = s.hardpointY - s.restLength - s.wheelRadius;
+  c.comY = Math.min(floor + h * klass.comHeight, groundY + tipSafe);
   c.comZ = BASE.chassis.comZ;
   c.comX = 0;
 
   // --- engine, brakes and steering ----------------------------------------
   d.torqueCurve = BASE.drivetrain.torqueCurve.map((v) => Math.round(v * klass.power));
   d.layout = klass.layout;
+  // Gear the whole box from the wheel it is turning and the speed the vehicle
+  // is meant to reach in top: final drive is what converts one into the other.
+  // With a fixed ratio, a truck's half-metre wheel leaves the engine below idle
+  // at walking pace, and the vehicle pulls away on the weakest torque it has.
+  const topGear = d.gearRatios[d.gearRatios.length - 1] ?? 1;
+  const limiterRad = (d.limiterRPM * Math.PI) / 30;
+  d.finalDrive = clamp(
+    (limiterRad * s.wheelRadius) / Math.max(1, klass.topSpeed * topGear),
+    2.2,
+    12,
+  );
   d.brakeTorqueFront = Math.round(BASE.drivetrain.brakeTorqueFront * massRatio);
   d.brakeTorqueRear = Math.round(BASE.drivetrain.brakeTorqueRear * massRatio);
-  params.tyre.peakGrip = BASE.tyre.peakGrip * klass.grip;
+  params.tyre.peakGrip = grip;
   // Long vehicles turn their wheels less, which is most of why they feel long.
   params.steering.maxAngle = Math.round(
     BASE.steering.maxAngle * clamp(4.4 / klass.length, 0.62, 1.15),

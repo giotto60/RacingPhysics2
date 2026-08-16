@@ -402,6 +402,10 @@ async function boot(): Promise<void> {
     car,
     carView,
     opponents,
+    // The computer driver, so a test can step the opponents at the fixed rate
+    // instead of at whatever a software rasteriser manages to render.
+    driveAlong,
+    rescue,
     carModels: CAR_MODELS,
     selectCarModel,
     fullReset,

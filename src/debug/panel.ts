@@ -418,6 +418,7 @@ export class DebugPanel {
     f.add(c, 'leadFactor', 0, 1.2, 0.01).name('speed lead');
     f.add(c, 'pullbackFactor', 0, 1.5, 0.01).name('speed pull-back');
     f.add(c, 'baseViewHeight', 10, 70, 0.5).name('base view height');
+    f.add(c, 'framingX', -0.4, 0.4, 0.01).name('car across screen');
     f.add(c, 'pitch', 0.15, 1.5, 0.01).name('pitch');
     f.add(c, 'followDamping', 0.005, 0.5, 0.005).name('follow damping');
   }
