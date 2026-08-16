@@ -232,12 +232,6 @@ export interface Params {
     baseViewHeight: number;
     pitch: number;
     followDamping: number;
-    /**
-     * Where the car sits across the window, as a fraction of its width from the
-     * middle. Zero is the middle of the window; about -0.13 is the middle of
-     * the part the tuning panel is not covering.
-     */
-    framingX: number;
   };
 }
 
@@ -414,7 +408,7 @@ export const defaultParams = (): Params => ({
     mode: 'B-follow',
     fixedYaw: 45,
     followOffset: 0,
-    yawDamping: 0.3,
+    yawDamping: 0.45,
     // Zero: the car stays in the middle of the screen, which is worth more than
     // the extra road the lead used to buy. The slider is still there.
     leadFactor: 0,
@@ -422,7 +416,6 @@ export const defaultParams = (): Params => ({
     baseViewHeight: 26,
     pitch: Math.atan(Math.SQRT1_2),
     followDamping: 0.06,
-    framingX: 0,
   },
 });
 

@@ -25,7 +25,17 @@ export class SkidMarks {
   private indices = new Uint32Array(MAX_SEGMENTS * 6);
   private cursor = 0;
   private count = 0;
-  private lastPoint: (THREE.Vector3 | null)[] = [null, null, null, null];
+  /**
+   * Where each wheel last laid rubber, keyed by the wheel itself.
+   *
+   * Every car on the circuit lays its marks into this one mesh, so an anchor
+   * held per wheel *index* is shared between them: the player's front left
+   * writes slot 0, an opponent's front left reads it back, and the segment
+   * between them is drawn as a ribbon hundreds of metres long across the map.
+   * Keying on the wheel keeps each car's trail its own, for any number of cars,
+   * with nothing to register and nothing to release.
+   */
+  private lastPoint = new WeakMap<WheelState, THREE.Vector3>();
 
   constructor(scene: THREE.Scene, private params: Params) {
     for (let i = 0; i < MAX_SEGMENTS; i += 1) {
@@ -63,7 +73,7 @@ export class SkidMarks {
   clear(): void {
     this.cursor = 0;
     this.count = 0;
-    this.lastPoint = [null, null, null, null];
+    this.lastPoint = new WeakMap();
     this.geometry.setDrawRange(0, 0);
   }
 
@@ -71,27 +81,27 @@ export class SkidMarks {
     const p = this.params.expression;
     const halfWidth = this.params.suspension.wheelWidth * 0.6;
 
-    wheels.forEach((wheel, i) => {
+    for (const wheel of wheels) {
       const laysRubber = wheel.grounded && !surfaceIsLoose[wheel.surface];
       const slip = wheel.utilisation;
       // Rubber is left behind by rubber sliding, so the contact patch has to be
       // moving over the road, not merely loaded up.
       if (!laysRubber || slip < p.skidThreshold || wheel.slipSpeed < p.minSlipSpeed) {
-        this.lastPoint[i] = null;
-        return;
+        this.lastPoint.delete(wheel);
+        continue;
       }
 
       const current = wheel.contactPoint.clone();
       current.y += 0.02;
-      const previous = this.lastPoint[i];
+      const previous = this.lastPoint.get(wheel);
       if (!previous) {
-        this.lastPoint[i] = current;
-        return;
+        this.lastPoint.set(wheel, current);
+        continue;
       }
       // The anchor only moves when a segment is actually emitted, so short
       // steps accumulate into one segment instead of cancelling each other.
-      if (previous.distanceToSquared(current) < MIN_SEGMENT_SQ) return;
-      this.lastPoint[i] = current;
+      if (previous.distanceToSquared(current) < MIN_SEGMENT_SQ) continue;
+      this.lastPoint.set(wheel, current);
 
       const dir = current.clone().sub(previous).normalize();
       const side = new THREE.Vector3(0, 1, 0).cross(dir).multiplyScalar(halfWidth);
@@ -105,7 +115,7 @@ export class SkidMarks {
       const shade = 0.12 - t * 0.1;
 
       this.pushQuad(previous, current, side, shade, alpha);
-    });
+    }
 
     this.geometry.setDrawRange(0, this.count * 6);
     (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;

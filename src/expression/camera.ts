@@ -90,9 +90,6 @@ export class ChaseCamera {
     this.view.target.lerp(this.target, clamp(follow, 0, 1));
 
     this.view.cameraConfig.viewHeight = c.baseViewHeight + speed * c.pullbackFactor;
-    // Positive framing moves the car right across the window, which means
-    // sliding the visible window the other way.
-    this.view.viewOffsetX = -c.framingX * window.innerWidth;
     this.view.updateProjection();
     this.view.updateCamera();
 

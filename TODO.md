@@ -70,13 +70,37 @@
 | Sedan / race / fire truck | 1450 / 820 / 9000 kg, 619 / 941 / 1287 Nm, 2.38 / 2.79 / 3.53 m wheelbase |
 | Tyre radius, sedan / race / tractor | 0.37 / 0.50 / 0.61 m, each the model's own |
 
+## The car off to the right, and skid marks between cars
+
+- [x] The car in the middle of the window on any display. The canvas was being
+      given a drawing buffer of `size x devicePixelRatio` with its CSS size
+      suppressed, so it laid itself out at the buffer size in CSS pixels and
+      hung off the bottom right of the window, taking the middle of the view
+      with it. Three rounds of camera tuning were aimed at the wrong thing.
+- [x] Both earlier attempts removed: `camera.framingX`, `SceneView.viewOffsetX`
+      and the projection shift are gone, and `yawDamping` is back at 0.45.
+- [x] The framing check runs at three pixel ratios now and measures against the
+      canvas's own client rect. At 1x, the only ratio Playwright uses by
+      default, the bug does not show at all.
+- [x] Skid marks belong to the wheel that laid them. Every car draws into one
+      mesh and the anchor was an array of four slots shared between them, so
+      each segment was a ribbon strung from one car to another.
+
+| Check | Result |
+|---|---|
+| Car across the window, pixel ratio 1 / 1.25 / 1.5 / 2 / 3 | 0.500 / 0.500 / 0.500 / 0.499 / 0.499, was 0.500 / 0.625 / 0.750 / 0.999 / 0.999 |
+| Canvas CSS box against the window, same ratios | 1280x800 for all five, was up to 3840x2400 |
+| Longest skid segment, three cars sliding for 20 s | 0.39 m, was 87.8 m |
+| Segments over 5 m, of 6000 live | 0, was 6000 |
+| Median segment | 0.24 m, was 38.4 m |
+| Fault-pass suite after both fixes | every row unchanged |
+
 ## Framing and rollover
 
 - [x] The car in the middle of the window, in every state. The camera lead was
       moving it sideways through a corner because the rig's yaw lags the car's;
-      the lead is zero by default and the slider is still there.
-- [x] `camera.framingX` on the panel, for anyone who wants the car offset from
-      the middle -- about -0.13 centres it in the part the panel is not over.
+      the lead is zero by default and the slider is still there. This was real
+      but small -- 27 px of 1280 -- and not what the report was about.
 - [x] Every vehicle slides before it tips. The centre of mass is capped from the
       vehicle's own track and grip with a 25% margin, so the tyres always let go
       first, from a kart to a nine-tonne fire engine.
@@ -88,6 +112,7 @@
 |---|---|
 | Car across the window, at rest / driving / cornering | 640 / 640 / 640 px of 1280, was 667 cornering |
 | Car up the window, same three states | 400 / 397 / 397 px of 800, was 451 |
+| (both measured at pixel ratio 1, which hid the real fault) | see the section above |
 | Tip threshold, sedan / race / SUV / fire truck / box | 2.72 / 3.68 / 2.73 / 2.73 / 2.73 g against 2.18-2.94 of grip |
 | Full lock held at speed, those five vehicles | worst tilt 1 deg, none lifted a wheel, none flipped |
 | Centre of mass, race / sedan / SUV / fire truck | 0.23 / 0.29 / 0.31 / 0.39 m above the contact patch |

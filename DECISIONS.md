@@ -2,6 +2,35 @@
 
 Assumptions and choices made without asking. Newest first.
 
+## The car off to the right, and skid marks between cars
+
+- **The car was off-centre because the canvas was bigger than the window, not
+  because of anything the camera did.** `setSize(w, h, false)` sets the drawing
+  buffer to `size x devicePixelRatio` and suppresses the CSS size, so the canvas
+  laid itself out at the buffer size *in CSS pixels*: on a 1.5x display, a
+  canvas half again wider than the window, pinned to the top left, with the
+  middle of the view three quarters of the way across the screen. Measured at
+  0.500 of the window at 1x, 0.750 at 1.5x and 0.999 at 2x. Letting three.js
+  write the CSS size fixes it at every ratio.
+- **Two rounds of camera work were spent on the wrong cause, and are reverted.**
+  The lead and the yaw damping were tuned, then a `framingX` parameter and a
+  `viewOffsetX` on the view were added to slide the projection sideways. None of
+  it was the fault, all of it is gone. `yawDamping` is back at its authored
+  0.45. `leadFactor` stays at zero, not as a fix but because the car staying in
+  the middle is worth more than the road the lead bought; the slider is there.
+- **Nothing in the test rig could have caught this.** Playwright defaults to
+  `deviceScaleFactor: 1`, the one ratio at which the bug is invisible, and
+  projecting a world point through the camera gives the right answer regardless
+  because the projection was never wrong. The framing check now runs at 1x, 1.5x
+  and 2x and measures against the canvas's own client rect.
+- **Skid marks are anchored to the wheel, not to its index.** Every car lays
+  into one mesh, and the anchor was an array of four slots, so the player's
+  front left wrote slot 0 and an opponent's front left read it back: a ribbon
+  drawn between two cars, a hundred metres of it, across the map. Every one of
+  the 6000 live segments was one, median 38 m. A `WeakMap` keyed on the wheel
+  gives each car its own trail with nothing to register and nothing to release;
+  the longest segment is now 0.39 m.
+
 ## Framing and rollover
 
 - **The centre of mass is capped so every vehicle slides before it tips.** A car
@@ -15,13 +44,10 @@ Assumptions and choices made without asking. Newest first.
 - **The camera no longer leads the car.** The lead was 0.32 m per m/s, and
   because the rig's yaw lags the car's through a corner it moved the car
   sideways across the screen as well as backwards: measured at 27 px right and
-  51 px below centre mid-corner. It is zero by default, the car sits within a
-  pixel of the middle of the window in every state, and the slider is still
-  there for anyone who wants the extra road ahead.
-- **`camera.framingX` moves the car across the screen**, as a fraction of the
-  window's width. Zero is the middle of the window; about -0.13 is the middle of
-  the part the tuning panel is not covering, which is the other thing "the
-  middle of the screen" can reasonably mean.
+  51 px below centre mid-corner. It is zero by default and the slider is still
+  there for anyone who wants the extra road ahead. This was *not* what put the
+  car off to the right -- see the section above -- but zero is still the right
+  default for a car that is meant to sit in the middle.
 - **The gearbox is geared from the wheel it turns.** A fixed final drive is fine
   for one wheel size and wrong for every other: on a truck's half-metre wheel it
   left the engine below idle at walking pace, so a nine-tonne fire engine pulled

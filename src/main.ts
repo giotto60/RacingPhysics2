@@ -347,11 +347,6 @@ async function boot(): Promise<void> {
   });
   panelRef = panel;
 
-  // The car sits in the middle of the window, with the panel overlapping the
-  // view rather than the framing being pushed out of the way of it.
-  view.viewOffsetX = 0;
-  view.updateProjection();
-
   input.onAction = (action) => {
     switch (action) {
       case 'respawn':

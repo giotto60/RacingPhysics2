@@ -36,12 +36,6 @@ export class SceneView {
   readonly target = new THREE.Vector3();
 
   zoom = 1;
-  /**
-   * Pixels to slide the visible window sideways. Zero puts the car in the
-   * middle of the window; the panel then overlaps the right of the view, which
-   * is the trade the player asked for.
-   */
-  viewOffsetX = 0;
 
   private hemi: THREE.HemisphereLight;
   private key: THREE.DirectionalLight;
@@ -91,23 +85,29 @@ export class SceneView {
     window.addEventListener('resize', this.resize);
   }
 
+  /**
+   * The canvas covers the window exactly, and the drawing buffer behind it is
+   * the display's own resolution.
+   *
+   * Both halves matter. `setSize` with the style suppressed sets the buffer to
+   * `size * devicePixelRatio` and leaves the element's CSS size unset, so the
+   * canvas lays *itself* out at the buffer size in CSS pixels -- on a 1.5x
+   * display that is a canvas half again wider than the window, pinned to the
+   * top left, with the middle of the view at three quarters of the way across
+   * the screen. Letting three.js write the CSS size is what keeps the two in
+   * step at any pixel ratio.
+   */
   private resize = (): void => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    this.renderer.setSize(w, h, false);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.updateProjection();
   };
 
   updateProjection(): void {
-    const height = Math.max(1, window.innerHeight);
-    const aspect = window.innerWidth / height;
+    const aspect = window.innerWidth / Math.max(1, window.innerHeight);
     const halfH = (this.cameraConfig.viewHeight * this.zoom) * 0.5;
     const halfW = halfH * aspect;
-    // Convert the pixel offset into world units at the current zoom, so the
-    // framing stays put as the camera pulls back with speed.
-    const shift = (this.viewOffsetX / height) * this.cameraConfig.viewHeight * this.zoom;
-    this.camera.left = -halfW + shift;
-    this.camera.right = halfW + shift;
+    this.camera.left = -halfW;
+    this.camera.right = halfW;
     this.camera.top = halfH;
     this.camera.bottom = -halfH;
     this.camera.updateProjectionMatrix();
